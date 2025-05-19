@@ -135,7 +135,7 @@ export default function EmployeeDashboard() {
                             </NavLink>
                         </li>
                         <li className="mb-2">
-                            <NavLink
+                            {/* <NavLink
                                 to="/employee-panel/settings"
                                 className={({isActive}) =>
                                     `flex items-center space-x-2 py-2 px-2 rounded-md ${
@@ -147,7 +147,7 @@ export default function EmployeeDashboard() {
                             >
                                 <Settings size={18} />
                                 <span>Settings</span>
-                            </NavLink>
+                            </NavLink> */}
                         </li>
                     </ul>
                 </div>

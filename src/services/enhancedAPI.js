@@ -2,7 +2,7 @@ import axios from 'axios';
 import { toast } from 'react-toastify';
 
 // Configuration
-const API_URL = 'https://lead-backend-jcyc.onrender.com/api';
+const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // ms
 const REQUEST_TIMEOUT = 15000; // ms
@@ -142,6 +142,18 @@ const makeRequest = async (method, url, data = null, options = {}) => {
 
     const response = await api(config);
     console.log(`API response from ${method.toUpperCase()} ${url}:`, response.data);
+
+    // Special handling for lead assignment endpoint
+    if (url === '/leads/assign/employee' && method.toLowerCase() === 'post') {
+      // If the response status is 200 but there's no success field, add it
+      if (response.status === 200 && response.data && response.data.data) {
+        if (response.data.success === undefined) {
+          console.log('Adding success field to lead assignment response');
+          response.data.success = true;
+        }
+      }
+    }
+
     return response.data;
   } catch (error) {
     // Format error message for consistent handling
@@ -212,8 +224,15 @@ export const enhancedAPI = {
     getByEmployee: async (employeeId, params = {}) => {
       try {
         console.log('Fetching leads for employee:', employeeId);
+        // Add sort parameter to get most recent leads first
+        const enhancedParams = {
+          ...params,
+          sort: '-updatedAt', // Sort by most recently updated
+          limit: params.limit || 50 // Get more leads to ensure we have enough recent ones
+        };
+
         // Try the dedicated endpoint first
-        const response = await makeRequest('get', `/leads/employee/${employeeId}`, null, { params });
+        const response = await makeRequest('get', `/leads/employee/${employeeId}`, null, { params: enhancedParams });
         console.log('Response from employee leads endpoint:', response);
         return response;
       } catch (error) {
@@ -222,7 +241,12 @@ export const enhancedAPI = {
         try {
           console.log('Trying fallback method with filter');
           const fallbackResponse = await makeRequest('get', '/leads', null, {
-            params: { ...params, assignedEmployee: employeeId }
+            params: {
+              ...params,
+              assignedEmployee: employeeId,
+              sort: '-updatedAt', // Sort by most recently updated
+              limit: params.limit || 50 // Get more leads to ensure we have enough recent ones
+            }
           });
           console.log('Response from fallback method:', fallbackResponse);
           return fallbackResponse;
@@ -267,9 +291,22 @@ export const enhancedAPI = {
     getById: (id) => makeRequest('get', `/users/${id}`),
     getByRole: (role) => makeRequest('get', `/users/role/${role}`),
     create: (data) => makeRequest('post', '/users', data),
-    update: (id, data) => makeRequest('put', `/users/${id}`, data),
+    update: (id, data) => {
+      // Check if this is a password update
+      if (data.currentPassword && data.newPassword) {
+        console.log('Password update detected, using password update endpoint');
+        return makeRequest('post', `/users/${id}/change-password`, {
+          currentPassword: data.currentPassword,
+          newPassword: data.newPassword
+        });
+      }
+      // Regular update
+      return makeRequest('put', `/users/${id}`, data);
+    },
     delete: (id) => makeRequest('delete', `/users/${id}`),
     updateRole: (id, role) => makeRequest('patch', `/users/${id}/role`, { role }),
+    changePassword: (id, currentPassword, newPassword) =>
+      makeRequest('post', `/users/${id}/change-password`, { currentPassword, newPassword }),
   },
 
   // Auth endpoints
@@ -335,60 +372,41 @@ export const enhancedAPI = {
     toggleComplete: (id) => makeRequest('patch', `/reminders/${id}/toggle`),
   },
 
+  // Task endpoints
+  tasks: {
+    getAll: () => makeRequest('get', '/tasks'),
+    getById: (id) => makeRequest('get', `/tasks/${id}`),
+    create: (data) => makeRequest('post', '/tasks', data),
+    update: (id, data) => makeRequest('put', `/tasks/${id}`, data),
+    delete: (id) => makeRequest('delete', `/tasks/${id}`),
+    toggleComplete: (id) => makeRequest('patch', `/tasks/${id}/toggle`),
+  },
+
   // Follow-up endpoints
   followUps: {
+    // Get all follow-ups with optional employeeId filter
     getAll: (params = {}) => makeRequest('get', '/follow-ups', null, { params }),
-    getById: (id) => makeRequest('get', `/follow-ups/${id}`),
-    getByLead: (leadId) => makeRequest('get', `/follow-ups/lead/${leadId}`),
+
+    // Get follow-ups for a specific employee
     getByEmployee: (employeeId, params = {}) => makeRequest('get', `/follow-ups/employee/${employeeId}`, null, { params }),
-    create: (data) => makeRequest('post', '/follow-ups', data),
-    update: (id, data) => makeRequest('put', `/follow-ups/${id}`, data),
-    delete: (id) => makeRequest('delete', `/follow-ups/${id}`),
-    markComplete: (id) => makeRequest('patch', `/follow-ups/${id}/complete`),
 
-    // Fallback method to update lead with follow-up data if dedicated endpoint fails
-    addToLead: async (leadId, followUpData) => {
-      try {
-        // Try to use the dedicated follow-up endpoint first
-        const response = await makeRequest('post', '/follow-ups', {
-          ...followUpData,
-          leadId
-        });
-        return response;
-      } catch (error) {
-        console.log('Error using dedicated follow-up endpoint, falling back to lead update:', error);
+    // Get follow-ups for a specific lead
+    getByLead: (leadId) => makeRequest('get', `/follow-ups/lead/${leadId}`),
 
-        // Fall back to updating the lead with the follow-up data
-        try {
-          // Get the current lead data
-          const leadResponse = await makeRequest('get', `/leads/${leadId}`);
-          const lead = leadResponse.data;
+    // Create a new follow-up
+    create: (data) => makeRequest('put', `/follow-ups/${data.leadId}`, data),
 
-          // Add the follow-up to the lead's followUps array
-          const followUps = lead.followUps || [];
-          const newFollowUp = {
-            id: Date.now().toString(), // Generate a unique ID
-            ...followUpData,
-            createdAt: new Date().toISOString()
-          };
+    // Update a follow-up
+    update: (leadId, data) => makeRequest('put', `/follow-ups/${leadId}`, data),
 
-          // Update the lead with the new follow-up
-          const updateResponse = await makeRequest('put', `/leads/${leadId}`, {
-            ...lead,
-            followUps: [...followUps, newFollowUp]
-          });
+    // Delete a follow-up
+    delete: (leadId) => makeRequest('delete', `/follow-ups/${leadId}`),
 
-          return {
-            success: true,
-            data: newFollowUp,
-            message: 'Follow-up added to lead successfully (fallback method)'
-          };
-        } catch (fallbackError) {
-          console.error('Fallback method also failed:', fallbackError);
-          throw fallbackError;
-        }
-      }
-    }
+    // Get upcoming follow-ups
+    getUpcoming: () => makeRequest('get', '/leads/upcoming-follow-ups'),
+
+    // Get leads with follow-ups
+    getLeadsWithFollowUps: (params = {}) => makeRequest('get', '/leads/follow-ups', null, { params })
   }
 };
 

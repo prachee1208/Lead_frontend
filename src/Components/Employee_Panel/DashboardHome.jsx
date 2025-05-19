@@ -1,17 +1,17 @@
 import { useState, useEffect } from 'react';
 import {
-    BarChart3, Users, UserPlus, PhoneCall,
+    Users, UserPlus,
     Calendar, Clock, List, CheckCircle,
     ArrowUp, ArrowDown, Phone, Mail, MessageSquare,
-    AlertCircle, Loader, RefreshCw, Database,
-    PieChart, TrendingUp
+    AlertCircle, Loader, RefreshCw
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { dataFetcher } from '../../services/dataFetcher';
-import { getConnectionStatus, enhancedAPI } from '../../services/enhancedAPI';
+import { enhancedAPI } from '../../services/enhancedAPI';
 import { toast } from 'react-toastify';
 import ConnectionMonitor from '../common/ConnectionMonitor';
 import LeadStatusChart from './LeadStatusChart';
+import '../../../src/utils/dashboardUpdater';
 
 export default function DashboardHome() {
     // State for leads data
@@ -33,11 +33,17 @@ export default function DashboardHome() {
 
     // Fetch leads assigned to the current employee using enhanced data fetcher
     const fetchLeads = async (options = {}) => {
-        // Only show loading indicator on initial load, not during background updates
-        if (!options.forceRefresh) {
+        const { silent = false, isPartOfBatchUpdate = false, forceRefresh = false } = options;
+
+        // Only show loading indicator if this is not a silent update or part of a batch update
+        if (!silent && !isPartOfBatchUpdate && !forceRefresh) {
             setIsLoadingLeads(true);
         }
-        setError(null);
+
+        // Only clear errors if this is not a silent update
+        if (!silent) {
+            setError(null);
+        }
 
         try {
             // Get the current user ID from localStorage
@@ -49,17 +55,19 @@ export default function DashboardHome() {
                 return;
             }
 
+            console.log(`Fetching leads for employee ID: ${userId} (silent: ${silent}, forceRefresh: ${forceRefresh})`);
+
             // Use the enhanced data fetcher with caching and offline support
             const response = await dataFetcher.fetchEmployeeLeads(userId, {}, {
                 // Force refresh data from server if specified
-                forceRefresh: options.forceRefresh || false,
+                forceRefresh: forceRefresh,
                 // Provide offline fallback data
                 offlineData: { data: { data: [] } },
                 // Handle errors
                 onError: (err) => {
                     console.error('Error in data fetcher:', err);
-                    // Only show error toast on initial load or if explicitly requested
-                    if (!options.forceRefresh || options.showErrors) {
+                    // Only show error toast if this is not a silent update
+                    if (!silent) {
                         setError('Failed to load leads. Please try again.');
                         toast.error('Failed to load leads: ' + (err.message || 'Unknown error'));
                     }
@@ -78,27 +86,79 @@ export default function DashboardHome() {
                     phone: lead.phone || 'N/A',
                     status: lead.status || 'New',
                     source: lead.source || 'N/A',
-                    assignedDate: new Date(lead.updatedAt).toLocaleDateString()
+                    assignedDate: new Date(lead.updatedAt).toLocaleDateString(),
+                    updatedAt: lead.updatedAt || lead.createdAt, // Use for sorting
+                    createdAt: lead.createdAt // Backup for sorting
                 }));
 
                 // Update stats based on real data
                 const totalLeads = formattedLeads.length;
                 const convertedLeads = formattedLeads.filter(lead => lead.status === 'Converted').length;
+                const contactedLeads = formattedLeads.filter(lead => lead.status === 'Contacted').length;
+                const qualifiedLeads = formattedLeads.filter(lead => lead.status === 'Qualified').length;
+
+                // Calculate change from previous values
+                const prevTotalLeads = parseInt(stats[0].value) || 0;
+                const prevConvertedLeads = parseInt(stats[2].value) || 0;
+
+                const totalLeadsChange = totalLeads - prevTotalLeads;
+                const convertedLeadsChange = convertedLeads - prevConvertedLeads;
 
                 // Update stats with real data
                 setStats(prevStats => {
                     const newStats = [...prevStats];
-                    newStats[0] = { ...newStats[0], value: totalLeads.toString(), change: `+${totalLeads}`, changeType: 'increase' };
-                    newStats[2] = { ...newStats[2], value: convertedLeads.toString(), change: `+${convertedLeads}`, changeType: 'increase' };
+
+                    // Update Total Leads card
+                    newStats[0] = {
+                        ...newStats[0],
+                        value: totalLeads.toString(),
+                        change: totalLeadsChange >= 0 ? `+${totalLeadsChange}` : `${totalLeadsChange}`,
+                        changeType: totalLeadsChange > 0 ? 'increase' : (totalLeadsChange < 0 ? 'decrease' : 'neutral')
+                    };
+
+                    // Update Converted Leads card
+                    newStats[2] = {
+                        ...newStats[2],
+                        value: convertedLeads.toString(),
+                        change: convertedLeadsChange >= 0 ? `+${convertedLeadsChange}` : `${convertedLeadsChange}`,
+                        changeType: convertedLeadsChange > 0 ? 'increase' : (convertedLeadsChange < 0 ? 'decrease' : 'neutral')
+                    };
+
                     return newStats;
                 });
 
+                // Log stats update for debugging
+                console.log('Dashboard stats updated:', {
+                    totalLeads,
+                    convertedLeads,
+                    contactedLeads,
+                    qualifiedLeads
+                });
+
                 // Take only the 3 most recent leads for the dashboard
-                // Sort by assignedDate (most recent first)
-                const sortedLeads = [...formattedLeads].sort((a, b) =>
-                    new Date(b.assignedDate) - new Date(a.assignedDate)
-                );
-                setRecentLeads(sortedLeads.slice(0, 3));
+                // Sort by updatedAt or createdAt (most recent first)
+                const sortedLeads = [...formattedLeads].sort((a, b) => {
+                    // First try to sort by updatedAt
+                    if (a.updatedAt && b.updatedAt) {
+                        return new Date(b.updatedAt) - new Date(a.updatedAt);
+                    }
+                    // Fall back to createdAt if updatedAt is not available
+                    else if (a.createdAt && b.createdAt) {
+                        return new Date(b.createdAt) - new Date(a.createdAt);
+                    }
+                    // Last resort: use assignedDate string (less accurate)
+                    return new Date(b.assignedDate) - new Date(a.assignedDate);
+                });
+
+                console.log('Recent leads before filtering:', sortedLeads.map(lead => ({
+                    id: lead.id,
+                    name: lead.name,
+                    updatedAt: lead.updatedAt,
+                    assignedDate: lead.assignedDate
+                })));
+
+                // Take the 5 most recent leads instead of just 3
+                setRecentLeads(sortedLeads.slice(0, 5));
 
                 // Update last updated timestamp if this was a manual refresh
                 if (options.forceRefresh && !options.isPartOfBatchUpdate) {
@@ -142,21 +202,173 @@ export default function DashboardHome() {
 
     // Load data on component mount and set up real-time updates
     useEffect(() => {
-        // Initial data fetch
-        fetchLeads();
-        fetchFollowUps();
-        fetchTasks();
+        // Initial data fetch with force refresh to ensure we get the latest data
+        console.log('Initial data fetch for dashboard');
+        fetchLeads({ forceRefresh: true });
+        fetchFollowUps({ forceRefresh: true });
+        fetchTasks({ forceRefresh: true });
+
+        // Clear cache before fetching to ensure fresh data
+        dataFetcher.invalidateCache('leads:employee');
+        dataFetcher.invalidateCache('followUps');
+        dataFetcher.invalidateCache('tasks');
 
         // Set up interval for real-time updates (every 30 seconds)
         const updateInterval = setInterval(() => {
-            console.log('Performing real-time data update');
+            console.log('Performing scheduled real-time data update');
             updateAllData();
-        }, 30000); // 30 seconds
+        }, 30000); // 30 seconds for regular updates
 
-        // Clean up interval on component unmount
+        // Set up a more frequent check for new leads (every 10 seconds)
+        const newLeadsInterval = setInterval(() => {
+            console.log('Checking for new leads');
+            fetchLeads({ forceRefresh: true, silent: true });
+        }, 10000); // 10 seconds for lead checks
+
+        // Clean up intervals on component unmount
         return () => {
             clearInterval(updateInterval);
-            console.log('Cleared real-time update interval');
+            clearInterval(newLeadsInterval);
+            console.log('Cleared real-time update intervals');
+        };
+    }, []);
+
+    // Set up a listener for database changes (simulated with localStorage events)
+    useEffect(() => {
+        // Function to handle storage events (used for cross-tab communication)
+        const handleStorageChange = (event) => {
+            // Get the current user ID to check if updates are relevant
+            const currentUserId = localStorage.getItem('userId');
+
+            if (event.key === 'lead_assigned') {
+                try {
+                    const data = JSON.parse(event.newValue);
+                    console.log('Lead assignment detected:', data);
+
+                    // Check if this lead was assigned to the current user
+                    if (data.employeeId === currentUserId) {
+                        console.log('New lead assigned to current user, refreshing dashboard data');
+
+                        // Show notification to user
+                        toast.success(`New lead assigned: ${data.leadName || 'Unknown lead'}`, {
+                            position: "top-right",
+                            autoClose: 5000,
+                            hideProgressBar: false,
+                            closeOnClick: true,
+                            pauseOnHover: true,
+                            draggable: true,
+                        });
+
+                        // Force refresh leads data immediately
+                        fetchLeads({ forceRefresh: true });
+
+                        // Update stats and other data
+                        updateAllData();
+                    }
+                } catch (err) {
+                    console.error('Error processing lead assignment notification:', err);
+                }
+            } else if (event.key === 'lead_updated') {
+                try {
+                    const data = JSON.parse(event.newValue);
+                    console.log('Lead update detected:', data);
+
+                    // Check if this lead belongs to the current user
+                    if (data.employeeId === currentUserId) {
+                        console.log('Lead update for current user, refreshing dashboard data');
+                        fetchLeads({ forceRefresh: true });
+                    }
+                } catch (err) {
+                    console.error('Error processing lead update notification:', err);
+                }
+            } else if (event.key === 'lead_status_changed') {
+                try {
+                    const data = JSON.parse(event.newValue);
+                    console.log('Lead status change detected:', data);
+
+                    // Check if this lead belongs to the current user
+                    if (data.employeeId === currentUserId) {
+                        console.log('Lead status change for current user, refreshing dashboard data');
+
+                        // Show notification for important status changes
+                        if (data.newStatus === 'Converted' || data.newStatus === 'Lost') {
+                            toast.info(`Lead status changed: ${data.leadName} is now ${data.newStatus}`, {
+                                position: "top-right",
+                                autoClose: 5000,
+                            });
+                        }
+
+                        // Refresh leads and update stats
+                        fetchLeads({ forceRefresh: true });
+                    }
+                } catch (err) {
+                    console.error('Error processing lead status change notification:', err);
+                }
+            } else if (event.key === 'followup_changed') {
+                try {
+                    const data = JSON.parse(event.newValue);
+                    console.log('Follow-up change detected:', data);
+
+                    // Only refresh follow-ups when a follow-up is changed for this user
+                    if (data.employeeId === currentUserId) {
+                        console.log('Follow-up change for current user, refreshing follow-ups data');
+                        fetchFollowUps({ forceRefresh: true });
+                    }
+                } catch (err) {
+                    console.error('Error processing follow-up change notification:', err);
+                }
+            } else if (event.key === 'task_changed') {
+                try {
+                    const data = JSON.parse(event.newValue);
+                    console.log('Task change detected:', data);
+
+                    // Only refresh tasks when a task is changed for this user
+                    if (data.employeeId === currentUserId) {
+                        console.log('Task change for current user, refreshing tasks data');
+                        fetchTasks({ forceRefresh: true });
+                    }
+                } catch (err) {
+                    console.error('Error processing task change notification:', err);
+                }
+            }
+        };
+
+        // Listen for storage events
+        window.addEventListener('storage', handleStorageChange);
+
+        // Also check for direct localStorage changes (for same-tab updates)
+        const checkLocalStorage = () => {
+            const leadAssigned = localStorage.getItem('lead_assigned');
+            if (leadAssigned) {
+                try {
+                    const data = JSON.parse(leadAssigned);
+                    console.log('Lead assignment detected in same tab', data);
+
+                    // Show notification to user
+                    toast.success(`New lead assigned: ${data.leadName || 'Unknown lead'}`, {
+                        position: "top-right",
+                        autoClose: 5000,
+                        hideProgressBar: false,
+                        closeOnClick: true,
+                        pauseOnHover: true,
+                        draggable: true,
+                    });
+
+                    // Force refresh all data
+                    updateAllData();
+                } catch (err) {
+                    console.error('Error processing lead assignment notification:', err);
+                }
+            }
+        };
+
+        // Check for direct changes every 5 seconds
+        const directCheckInterval = setInterval(checkLocalStorage, 5000);
+
+        // Clean up event listener and interval
+        return () => {
+            window.removeEventListener('storage', handleStorageChange);
+            clearInterval(directCheckInterval);
         };
     }, []);
 
@@ -167,11 +379,17 @@ export default function DashboardHome() {
 
     // Fetch follow-ups for the current employee
     const fetchFollowUps = async (options = {}) => {
-        // Only show loading indicator on initial load, not during background updates
-        if (!options.forceRefresh) {
+        const { silent = false, isPartOfBatchUpdate = false, forceRefresh = false } = options;
+
+        // Only show loading indicator if this is not a silent update or part of a batch update
+        if (!silent && !isPartOfBatchUpdate && !forceRefresh) {
             setIsLoadingFollowUps(true);
         }
-        setFollowUpError(null);
+
+        // Only clear errors if this is not a silent update
+        if (!silent) {
+            setFollowUpError(null);
+        }
 
         try {
             // Get the current user ID from localStorage
@@ -182,6 +400,8 @@ export default function DashboardHome() {
                 setIsLoadingFollowUps(false);
                 return;
             }
+
+            console.log(`Fetching follow-ups for employee ID: ${userId} (silent: ${silent}, forceRefresh: ${forceRefresh})`);
 
             // Use the direct API call to get follow-ups for the employee
             const response = await enhancedAPI.followUps.getByEmployee(userId);
@@ -212,16 +432,27 @@ export default function DashboardHome() {
                 // Take only the 3 most recent follow-ups for the dashboard
                 setFollowUps(sortedFollowUps.slice(0, 3));
 
+                // Calculate change from previous value
+                const prevFollowUpsCount = parseInt(stats[1].value) || 0;
+                const followUpsChange = pendingFollowUps.length - prevFollowUpsCount;
+
                 // Update stats with follow-up count
                 setStats(prevStats => {
                     const newStats = [...prevStats];
                     newStats[1] = {
                         ...newStats[1],
                         value: pendingFollowUps.length.toString(),
-                        change: `+${pendingFollowUps.length}`,
-                        changeType: pendingFollowUps.length > 0 ? 'increase' : 'neutral'
+                        change: followUpsChange >= 0 ? `+${followUpsChange}` : `${followUpsChange}`,
+                        changeType: followUpsChange > 0 ? 'increase' : (followUpsChange < 0 ? 'decrease' : 'neutral')
                     };
                     return newStats;
+                });
+
+                // Log follow-ups update for debugging
+                console.log('Follow-ups updated:', {
+                    total: pendingFollowUps.length,
+                    change: followUpsChange,
+                    upcoming: sortedFollowUps.slice(0, 3).map(f => f.leadName)
                 });
             } else {
                 setFollowUps([]);
@@ -240,9 +471,10 @@ export default function DashboardHome() {
             }
         } catch (err) {
             console.error('Error fetching follow-ups:', err);
-            setFollowUpError('Failed to load follow-ups. Please try again.');
 
-            if (!options.forceRefresh || options.showErrors) {
+            // Only show errors if this is not a silent update
+            if (!silent) {
+                setFollowUpError('Failed to load follow-ups. Please try again.');
                 toast.error('Failed to load follow-ups: ' + (err.message || 'Unknown error'));
             }
         } finally {
@@ -257,11 +489,17 @@ export default function DashboardHome() {
 
     // Fetch tasks for the current employee
     const fetchTasks = async (options = {}) => {
-        // Only show loading indicator on initial load, not during background updates
-        if (!options.forceRefresh) {
+        const { silent = false, isPartOfBatchUpdate = false, forceRefresh = false } = options;
+
+        // Only show loading indicator if this is not a silent update or part of a batch update
+        if (!silent && !isPartOfBatchUpdate && !forceRefresh) {
             setIsLoadingTasks(true);
         }
-        setTaskError(null);
+
+        // Only clear errors if this is not a silent update
+        if (!silent) {
+            setTaskError(null);
+        }
 
         try {
             // Get the current user ID from localStorage
@@ -273,9 +511,19 @@ export default function DashboardHome() {
                 return;
             }
 
-            // Use the direct API call to get reminders/tasks
-            const response = await enhancedAPI.reminders.getAll();
-            console.log('Tasks/Reminders response:', response);
+            console.log(`Fetching tasks for employee ID: ${userId} (silent: ${silent}, forceRefresh: ${forceRefresh})`);
+
+            // Use the direct API call to get tasks
+            // First try the tasks API, then fall back to reminders if needed
+            let response;
+            try {
+                response = await enhancedAPI.tasks.getAll();
+                console.log('Tasks response:', response);
+            } catch (err) {
+                console.log('Error fetching from tasks API, falling back to reminders:', err);
+                response = await enhancedAPI.reminders.getAll();
+                console.log('Reminders response (fallback):', response);
+            }
 
             if (response && response.data) {
                 // Filter tasks for the current user
@@ -310,17 +558,37 @@ export default function DashboardHome() {
 
                 setTasks(sortedTasks);
 
+                // Calculate change from previous value
+                const prevTasksCount = parseInt(stats[3].value) || 0;
+                const tasksChange = todaysTasks.length - prevTasksCount;
+
                 // Update stats with task count
                 setStats(prevStats => {
                     const newStats = [...prevStats];
                     newStats[3] = {
                         ...newStats[3],
                         value: todaysTasks.length.toString(),
-                        change: `+${todaysTasks.length}`,
-                        changeType: todaysTasks.length > 0 ? 'increase' : 'neutral'
+                        change: tasksChange >= 0 ? `+${tasksChange}` : `${tasksChange}`,
+                        changeType: tasksChange > 0 ? 'increase' : (tasksChange < 0 ? 'decrease' : 'neutral')
                     };
                     return newStats;
                 });
+
+                // Log tasks update for debugging
+                console.log('Tasks updated:', {
+                    total: todaysTasks.length,
+                    change: tasksChange,
+                    completed: todaysTasks.filter(task => task.completed).length,
+                    pending: todaysTasks.filter(task => !task.completed).length
+                });
+
+                // If there are new tasks and this is a background update, show a notification
+                if (tasksChange > 0 && forceRefresh && !isPartOfBatchUpdate && !silent) {
+                    toast.info(`${tasksChange} new task${tasksChange > 1 ? 's' : ''} for today`, {
+                        position: "top-right",
+                        autoClose: 5000,
+                    });
+                }
             } else {
                 setTasks([]);
 
@@ -338,9 +606,10 @@ export default function DashboardHome() {
             }
         } catch (err) {
             console.error('Error fetching tasks:', err);
-            setTaskError('Failed to load tasks. Please try again.');
 
-            if (!options.forceRefresh || options.showErrors) {
+            // Only show errors if this is not a silent update
+            if (!silent) {
+                setTaskError('Failed to load tasks. Please try again.');
                 toast.error('Failed to load tasks: ' + (err.message || 'Unknown error'));
             }
         } finally {
@@ -445,9 +714,15 @@ export default function DashboardHome() {
                         <div className="flex items-end justify-between">
                             <div>
                                 <p className="text-2xl font-bold text-gray-800">{stat.value}</p>
-                                <p className={`text-xs ${stat.changeType === 'increase' ? 'text-emerald-500' : 'text-red-500'} font-medium`}>
-                                    {stat.changeType === 'increase' ? <ArrowUp size={12} className="inline" /> : <ArrowDown size={12} className="inline" />}
-                                    {' '}{stat.change} from yesterday
+                                <p className={`text-xs ${
+                                    stat.changeType === 'increase' ? 'text-emerald-500' :
+                                    stat.changeType === 'decrease' ? 'text-red-500' :
+                                    'text-gray-500'
+                                } font-medium`}>
+                                    {stat.changeType === 'increase' ? <ArrowUp size={12} className="inline" /> :
+                                     stat.changeType === 'decrease' ? <ArrowDown size={12} className="inline" /> :
+                                     null}
+                                    {' '}{stat.change} since last update
                                 </p>
                             </div>
                         </div>

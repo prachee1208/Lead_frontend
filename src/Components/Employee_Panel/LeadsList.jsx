@@ -1,19 +1,26 @@
 import { useState, useEffect } from 'react';
 import {
-    Search, Filter, Phone, Mail, MessageSquare,
+    Search, Filter,
     MoreHorizontal, Eye, History, Calendar, AlertCircle,
-    RefreshCw, Loader, Database
+    RefreshCw, Loader, Database, Clock, CheckCircle, XCircle
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import dataFetcher from '../../services/dataFetcher';
-import { getConnectionStatus } from '../../services/enhancedAPI';
+import { enhancedAPI, getConnectionStatus } from '../../services/enhancedAPI';
 import { toast } from 'react-toastify';
 import ConnectionMonitor from '../common/ConnectionMonitor';
+import { notifyLeadStatusChanged } from '../../utils/dashboardUpdater';
 
 export default function LeadsList() {
+    const navigate = useNavigate();
     const [leads, setLeads] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
+
+    // Add new state for follow-up management
+    const [selectedLead, setSelectedLead] = useState(null);
+    const [showFollowUpModal, setShowFollowUpModal] = useState(false);
+    const [followUpData, setFollowUpData] = useState(null);
 
     // Fetch leads assigned to the current employee using enhanced data fetcher
     const fetchLeads = async () => {
@@ -97,7 +104,13 @@ export default function LeadsList() {
                     status: lead.status || 'New',
                     source: lead.source || 'N/A',
                     assignedDate: new Date(lead.updatedAt).toLocaleDateString(),
-                    lastContact: lead.lastContact ? new Date(lead.lastContact).toLocaleDateString() : null
+                    lastContact: lead.lastContact ? new Date(lead.lastContact).toLocaleDateString() : null,
+                    followUp: lead.followUp ? {
+                        type: lead.followUp.type || 'call',
+                        status: lead.followUp.status || 'Scheduled',
+                        nextFollowUpDate: lead.followUp.nextFollowUpDate,
+                        notes: lead.followUp.notes || ''
+                    } : null
                 }));
 
                 console.log('Formatted leads:', formattedLeads);
@@ -128,7 +141,6 @@ export default function LeadsList() {
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('All');
     const [showActionMenu, setShowActionMenu] = useState(null);
-    const [showContactOptions, setShowContactOptions] = useState(null);
 
     const filteredLeads = leads.filter(lead => {
         // Apply search filter
@@ -145,26 +157,90 @@ export default function LeadsList() {
 
     const handleStatusChange = async (leadId, newStatus) => {
         try {
+            // Find the lead to get its name
+            const lead = leads.find(lead => lead.id === leadId);
+            if (!lead) {
+                console.error('Lead not found:', leadId);
+                return;
+            }
+
             // Optimistically update UI
             setLeads(leads.map(lead =>
                 lead.id === leadId ? { ...lead, status: newStatus } : lead
             ));
             setShowActionMenu(null);
 
+            // Prepare data for the update
+            const updateData = {
+                status: newStatus
+            };
+
+            // If status is being changed to Closed, add additional data
+            if (newStatus === 'Closed') {
+                // Add conversion date
+                updateData.conversionDate = new Date().toISOString();
+
+                // Add last contact date if not already set
+                if (!lead.lastContact) {
+                    updateData.lastContact = new Date().toISOString();
+                }
+            }
+
+            // Update last contact date if status is changed to "Contacted"
+            if (newStatus === 'Contacted') {
+                updateData.lastContact = new Date().toISOString();
+            }
+
+            console.log('Updating lead with data:', updateData);
+
             // Update in the database
-            const response = await enhancedAPI.leads.update(leadId, { status: newStatus });
+            const response = await enhancedAPI.leads.update(leadId, updateData);
             console.log('Update lead status response:', response);
 
             toast.success(`Lead status updated to ${newStatus}`);
 
-            // Update last contact date if status is changed to "Contacted"
-            if (newStatus === 'Contacted') {
-                const now = new Date().toISOString();
-                await enhancedAPI.leads.update(leadId, { lastContact: now });
+            // Notify dashboard updater about the status change
+            try {
+                // Create notification data
+                const notificationData = {
+                    id: leadId,
+                    name: lead.name,
+                    status: newStatus
+                };
+
+                // Use the dashboardUpdater utility
+                notifyLeadStatusChanged(notificationData);
+
+                console.log('Lead status change notification sent');
+            } catch (notifyError) {
+                console.warn('Failed to send status change notification:', notifyError);
             }
         } catch (err) {
             console.error('Error updating lead status:', err);
-            toast.error('Failed to update lead status: ' + (err.message || 'Unknown error'));
+
+            // Extract the most useful error message
+            let errorMessage = 'Failed to update lead status';
+
+            if (err.data && err.data.error) {
+                // Backend validation error
+                errorMessage += ': ' + err.data.error;
+            } else if (err.message) {
+                // Standard error message
+                errorMessage += ': ' + err.message;
+            } else if (typeof err === 'string') {
+                // String error
+                errorMessage += ': ' + err;
+            }
+
+            // Log detailed error information for debugging
+            console.log('Detailed error information:', {
+                message: err.message,
+                data: err.data,
+                status: err.status,
+                originalError: err.originalError
+            });
+
+            toast.error(errorMessage);
 
             // Refresh leads to ensure consistency
             fetchLeads();
@@ -207,9 +283,88 @@ export default function LeadsList() {
         switch(status) {
             case 'New': return 'bg-indigo-100 text-indigo-800 border border-indigo-200';
             case 'Contacted': return 'bg-amber-100 text-amber-800 border border-amber-200';
-            case 'Converted': return 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+            case 'Qualified': return 'bg-blue-100 text-blue-800 border border-blue-200';
+            case 'Proposal': return 'bg-purple-100 text-purple-800 border border-purple-200';
+            case 'Negotiation': return 'bg-yellow-100 text-yellow-800 border border-yellow-200';
+            case 'Closed': return 'bg-emerald-100 text-emerald-800 border border-emerald-200';
             case 'Lost': return 'bg-red-100 text-red-800 border border-red-200';
             default: return 'bg-slate-100 text-slate-800 border border-slate-200';
+        }
+    };
+
+    // Function to handle follow-up actions
+    const handleFollowUpAction = async (leadId, action) => {
+        try {
+            switch (action) {
+                case 'view':
+                    // Navigate to follow-up details
+                    navigate(`/employee-panel/leads/${leadId}/follow-up`);
+                    break;
+                case 'add':
+                    setSelectedLead(leadId);
+                    setShowFollowUpModal(true);
+                    break;
+                case 'update':
+                    // Fetch current follow-up data
+                    const response = await enhancedAPI.followUps.getByLead(leadId);
+                    if (response && response.success && response.data) {
+                        setFollowUpData(response.data);
+                        setSelectedLead(leadId);
+                        setShowFollowUpModal(true);
+                    }
+                    break;
+                case 'complete':
+                    await enhancedAPI.followUps.update(leadId, {
+                        status: 'Completed',
+                        nextFollowUpDate: new Date().toISOString()
+                    });
+                    toast.success('Follow-up marked as completed');
+                    fetchLeads(); // Refresh the leads list
+                    break;
+                case 'delete':
+                    if (window.confirm('Are you sure you want to delete this follow-up?')) {
+                        await enhancedAPI.followUps.update(leadId, {
+                            followUp: null
+                        });
+                        toast.success('Follow-up deleted successfully');
+                        fetchLeads(); // Refresh the leads list
+                    }
+                    break;
+                default:
+                    console.warn('Unknown follow-up action:', action);
+            }
+        } catch (err) {
+            console.error('Error handling follow-up action:', err);
+            toast.error('Failed to handle follow-up: ' + (err.message || 'Unknown error'));
+        }
+    };
+
+    // Function to handle follow-up form submission
+    const handleFollowUpSubmit = async (formData) => {
+        try {
+            if (followUpData) {
+                // Update existing follow-up
+                await enhancedAPI.followUps.update(selectedLead, {
+                    ...formData,
+                    nextFollowUpDate: new Date(`${formData.date}T${formData.time}`).toISOString()
+                });
+                toast.success('Follow-up updated successfully');
+            } else {
+                // Create new follow-up
+                await enhancedAPI.followUps.create({
+                    leadId: selectedLead,
+                    ...formData,
+                    nextFollowUpDate: new Date(`${formData.date}T${formData.time}`).toISOString()
+                });
+                toast.success('Follow-up created successfully');
+            }
+            setShowFollowUpModal(false);
+            setSelectedLead(null);
+            setFollowUpData(null);
+            fetchLeads(); // Refresh the leads list
+        } catch (err) {
+            console.error('Error submitting follow-up:', err);
+            toast.error('Failed to save follow-up: ' + (err.message || 'Unknown error'));
         }
     };
 
@@ -306,7 +461,10 @@ export default function LeadsList() {
                                         <option value="All">All Statuses</option>
                                         <option value="New">New</option>
                                         <option value="Contacted">Contacted</option>
-                                        <option value="Converted">Converted</option>
+                                        <option value="Qualified">Qualified</option>
+                                        <option value="Proposal">Proposal</option>
+                                        <option value="Negotiation">Negotiation</option>
+                                        <option value="Closed">Closed</option>
                                         <option value="Lost">Lost</option>
                                     </select>
                                 </div>
@@ -385,42 +543,12 @@ export default function LeadsList() {
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                     <div className="flex items-center justify-end space-x-2">
-                                                        {/* Contact Options Button */}
-                                                        <div className="relative">
-                                                            <button
-                                                                onClick={() => {
-                                                                    setShowContactOptions(showContactOptions === lead.id ? null : lead.id);
-                                                                    setShowActionMenu(null);
-                                                                }}
-                                                                className="p-1 rounded-full hover:bg-gray-100"
-                                                            >
-                                                                <Phone size={18} className="text-blue-500" />
-                                                            </button>
-
-                                                            {showContactOptions === lead.id && (
-                                                                <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-10">
-                                                                    <Link to={`/employee-panel/leads/${lead.id}/contact/phone`} className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                                                                        <Phone size={16} className="mr-2 text-blue-500" />
-                                                                        Call
-                                                                    </Link>
-                                                                    <Link to={`/employee-panel/leads/${lead.id}/contact/email`} className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                                                                        <Mail size={16} className="mr-2 text-green-500" />
-                                                                        Email
-                                                                    </Link>
-                                                                    <Link to={`/employee-panel/leads/${lead.id}/contact/message`} className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                                                                        <MessageSquare size={16} className="mr-2 text-orange-500" />
-                                                                        Message
-                                                                    </Link>
-                                                                </div>
-                                                            )}
-                                                        </div>
 
                                                         {/* More Actions Button */}
                                                         <div className="relative">
                                                             <button
                                                                 onClick={() => {
                                                                     setShowActionMenu(showActionMenu === lead.id ? null : lead.id);
-                                                                    setShowContactOptions(null);
                                                                 }}
                                                                 className="p-1 rounded-full hover:bg-gray-100"
                                                             >
@@ -433,40 +561,103 @@ export default function LeadsList() {
                                                                         <Eye size={16} className="mr-2 text-blue-500" />
                                                                         View Details
                                                                     </Link>
-                                                                    <Link to={`/employee-panel/leads/${lead.id}/history`} className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                                                    {/* <Link to={`/employee-panel/leads/${lead.id}/history`} className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                                                         <History size={16} className="mr-2 text-purple-500" />
                                                                         View History
-                                                                    </Link>
-                                                                    <Link to={`/employee-panel/leads/${lead.id}/follow-up`} className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                                                                        <Calendar size={16} className="mr-2 text-green-500" />
-                                                                        Add Follow-up
-                                                                    </Link>
+                                                                    </Link> */}
+
+                                                                    {/* Follow-up Section */}
                                                                     <div className="border-t border-gray-100 my-1"></div>
-                                                                    <div className="px-4 py-1 text-xs font-medium text-gray-500">Update Status</div>
-                                                                    <button
+                                                                    {/* <div className="px-4 py-1 text-xs font-medium text-gray-500">Follow-ups</div> */}
+
+                                                                    {/* {lead.followUp ? (
+                                                                        <>
+                                                                            <button
+                                                                                onClick={() => handleFollowUpAction(lead.id, 'view')}
+                                                                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                                                                            >
+                                                                                <Calendar size={16} className="mr-2 text-green-500" />
+                                                                                View Follow-up
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => handleFollowUpAction(lead.id, 'update')}
+                                                                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                                                                            >
+                                                                                <Clock size={16} className="mr-2 text-blue-500" />
+                                                                                Update Follow-up
+                                                                            </button>
+                                                                            {lead.followUp.status !== 'Completed' && (
+                                                                                <button
+                                                                                    onClick={() => handleFollowUpAction(lead.id, 'complete')}
+                                                                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                                                                                >
+                                                                                    <CheckCircle size={16} className="mr-2 text-green-500" />
+                                                                                    Mark Complete
+                                                                                </button>
+                                                                            )}
+                                                                            <button
+                                                                                onClick={() => handleFollowUpAction(lead.id, 'delete')}
+                                                                                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100 flex items-center"
+                                                                            >
+                                                                                <XCircle size={16} className="mr-2 text-red-500" />
+                                                                                Delete Follow-up
+                                                                            </button>
+                                                                        </>
+                                                                    ) : (
+                                                                        <button
+                                                                            onClick={() => handleFollowUpAction(lead.id, 'add')}
+                                                                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                                                                        >
+                                                                            <Calendar size={16} className="mr-2 text-green-500" />
+                                                                            Add Follow-up
+                                                                        </button>
+                                                                    )} */}
+
+                                                                    {/* Status Update Section */}
+                                                                    <div className="border-t border-gray-100 my-1"></div>
+                                                                    {/* <div className="px-4 py-1 text-xs font-medium text-gray-500">Update Status</div> */}
+                                                                    {/* <button
                                                                         onClick={() => handleStatusChange(lead.id, 'New')}
                                                                         className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                                                                     >
                                                                         New
-                                                                    </button>
-                                                                    <button
+                                                                    </button> */}
+                                                                    {/* <button
                                                                         onClick={() => handleStatusChange(lead.id, 'Contacted')}
                                                                         className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                                                                     >
                                                                         Contacted
                                                                     </button>
                                                                     <button
-                                                                        onClick={() => handleStatusChange(lead.id, 'Converted')}
+                                                                        onClick={() => handleStatusChange(lead.id, 'Qualified')}
                                                                         className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                                                                     >
-                                                                        Converted
+                                                                        Qualified
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleStatusChange(lead.id, 'Proposal')}
+                                                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                                                    >
+                                                                        Proposal
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleStatusChange(lead.id, 'Negotiation')}
+                                                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                                                    >
+                                                                        Negotiation
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleStatusChange(lead.id, 'Closed')}
+                                                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                                                    >
+                                                                        Closed
                                                                     </button>
                                                                     <button
                                                                         onClick={() => handleStatusChange(lead.id, 'Lost')}
                                                                         className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                                                                     >
                                                                         Lost
-                                                                    </button>
+                                                                    </button> */}
                                                                 </div>
                                                             )}
                                                         </div>
@@ -480,6 +671,91 @@ export default function LeadsList() {
                         )}
                     </div>
                 </>
+            )}
+
+            {/* Add Follow-up Modal */}
+            {showFollowUpModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-md">
+                        <h3 className="text-lg font-medium text-gray-900 mb-4">
+                            {followUpData ? 'Update Follow-up' : 'Add New Follow-up'}
+                        </h3>
+                        <form onSubmit={(e) => {
+                            e.preventDefault();
+                            const formData = new FormData(e.target);
+                            handleFollowUpSubmit({
+                                type: formData.get('type'),
+                                date: formData.get('date'),
+                                time: formData.get('time'),
+                                notes: formData.get('notes')
+                            });
+                        }}>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Type</label>
+                                    <select
+                                        name="type"
+                                        defaultValue={followUpData?.type || 'call'}
+                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                    >
+                                        <option value="call">Call</option>
+                                        <option value="email">Email</option>
+                                        <option value="meeting">Meeting</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Date</label>
+                                    <input
+                                        type="date"
+                                        name="date"
+                                        defaultValue={followUpData?.nextFollowUpDate ? new Date(followUpData.nextFollowUpDate).toISOString().split('T')[0] : ''}
+                                        required
+                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Time</label>
+                                    <input
+                                        type="time"
+                                        name="time"
+                                        defaultValue={followUpData?.nextFollowUpDate ? new Date(followUpData.nextFollowUpDate).toISOString().split('T')[1].slice(0, 5) : ''}
+                                        required
+                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Notes</label>
+                                    <textarea
+                                        name="notes"
+                                        defaultValue={followUpData?.notes || ''}
+                                        rows={3}
+                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                    />
+                                </div>
+                            </div>
+                            <div className="mt-6 flex justify-end space-x-3">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowFollowUpModal(false);
+                                        setSelectedLead(null);
+                                        setFollowUpData(null);
+                                    }}
+                                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="px-4 py-2 text-sm font-medium text-white bg-[#022d38] rounded-md hover:bg-[#043c4a]"
+                                >
+                                    {followUpData ? 'Update' : 'Add'} Follow-up
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
             )}
         </div>
     );

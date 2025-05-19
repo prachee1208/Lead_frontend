@@ -42,9 +42,9 @@ export default function DailyTasks() {
                 return;
             }
 
-            // Fetch reminders/tasks for the current employee
-            const response = await enhancedAPI.reminders.getAll();
-            console.log('Tasks/Reminders response:', response);
+            // Fetch tasks for the current employee
+            const response = await enhancedAPI.tasks.getAll();
+            console.log('Tasks response:', response);
 
             if (response && response.data) {
                 // Filter tasks for the current user
@@ -148,7 +148,7 @@ export default function DailyTasks() {
             ));
 
             // Update in the database
-            const response = await enhancedAPI.reminders.toggleComplete(taskId);
+            const response = await enhancedAPI.tasks.toggleComplete(taskId);
             console.log('Toggle task completion response:', response);
 
             toast.success('Task status updated successfully');
@@ -173,7 +173,7 @@ export default function DailyTasks() {
             setTasks(tasks.filter(task => task.id !== taskId));
 
             // Delete from the database
-            const response = await enhancedAPI.reminders.delete(taskId);
+            const response = await enhancedAPI.tasks.delete(taskId);
             console.log('Delete task response:', response);
 
             toast.success('Task deleted successfully');
@@ -233,7 +233,7 @@ export default function DailyTasks() {
             };
 
             // Save to API
-            const response = await enhancedAPI.reminders.create(taskData);
+            const response = await enhancedAPI.tasks.create(taskData);
             console.log('Create task response:', response);
 
             if (response && response.data) {

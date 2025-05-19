@@ -1,8 +1,11 @@
 import { enhancedAPI, getConnectionStatus } from './enhancedAPI';
 
 // Cache configuration
-const CACHE_EXPIRY = 5 * 60 * 1000; // 5 minutes in milliseconds
+const CACHE_EXPIRY = 2 * 60 * 1000; // 2 minutes in milliseconds for faster updates
 const CACHE_SIZE_LIMIT = 100; // Maximum number of items in cache
+
+// Special cache expiry for frequently changing data
+const LEADS_CACHE_EXPIRY = 30 * 1000; // 30 seconds for leads data
 
 // Cache storage
 const cache = {
@@ -23,8 +26,11 @@ const cacheManager = {
     const data = cache.data.get(key);
     const timestamp = cache.timestamps.get(key);
 
+    // Determine which cache expiry to use
+    const expiryTime = key.startsWith('leads:') ? LEADS_CACHE_EXPIRY : CACHE_EXPIRY;
+
     // Check if data exists and is not expired
-    if (data && timestamp && Date.now() - timestamp < CACHE_EXPIRY) {
+    if (data && timestamp && Date.now() - timestamp < expiryTime) {
       // Update access order for LRU eviction
       const index = cache.accessOrder.indexOf(key);
       if (index > -1) {
@@ -210,18 +216,35 @@ export const dataFetcher = {
    */
   fetchEmployeeLeads: (employeeId, params = {}, options = {}) => {
     console.log('dataFetcher.fetchEmployeeLeads called with employeeId:', employeeId);
-    const key = `leads:employee:${employeeId}:${JSON.stringify(params)}`;
+
+    // Always include sort parameter to get most recent leads first
+    const enhancedParams = {
+      ...params,
+      sort: params.sort || '-updatedAt', // Sort by most recently updated by default
+      limit: params.limit || 50 // Get more leads to ensure we have enough recent ones
+    };
+
+    const key = `leads:employee:${employeeId}:${JSON.stringify(enhancedParams)}`;
+
+    // For lead data, we want to force refresh more often
+    const enhancedOptions = {
+      ...options,
+      // If it's been more than 30 seconds since the last fetch, force a refresh
+      forceRefresh: options.forceRefresh ||
+        (cache.timestamps.get(key) && (Date.now() - cache.timestamps.get(key) > LEADS_CACHE_EXPIRY))
+    };
+
     return dataFetcher.fetch(key, async () => {
-      console.log('Executing API call to get employee leads');
+      console.log('Executing API call to get employee leads with params:', enhancedParams);
       try {
-        const result = await enhancedAPI.leads.getByEmployee(employeeId, params);
+        const result = await enhancedAPI.leads.getByEmployee(employeeId, enhancedParams);
         console.log('API call successful, result:', result);
         return result;
       } catch (error) {
         console.error('API call failed:', error);
         throw error;
       }
-    }, options);
+    }, enhancedOptions);
   },
 
   // Fetch leads assigned by a manager

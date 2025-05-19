@@ -426,7 +426,7 @@ export default function AssignedLeads() {
 
             // If enhanced API fails, try direct axios call
             try {
-                const API_URL = 'https://lead-backend-jcyc.onrender.com/api';
+                const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
                 const token = localStorage.getItem('token');
 
                 const axiosResponse = await axios.delete(`${API_URL}/leads/${selectedLead.id}`, {
@@ -498,7 +498,7 @@ export default function AssignedLeads() {
 
             // If enhanced API fails, try direct axios call
             try {
-                const API_URL = 'https://lead-backend-jcyc.onrender.com/api';
+                const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
                 const token = localStorage.getItem('token');
 
                 const axiosResponse = await axios.post(
@@ -620,7 +620,7 @@ export default function AssignedLeads() {
 
             // If enhanced API fails, try direct axios call
             try {
-                const API_URL = 'https://lead-backend-jcyc.onrender.com/api';
+                const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
                 const token = localStorage.getItem('token');
 
                 const axiosResponse = await axios.put(

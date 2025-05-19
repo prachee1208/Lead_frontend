@@ -10,6 +10,7 @@ import { leadsAPI } from '../../services/api';
 import { enhancedAPI } from '../../services/enhancedAPI';
 import { toast } from 'react-toastify';
 import FollowUpForm from './FollowUpForm';
+import { notifyLeadStatusChanged } from '../../utils/dashboardUpdater';
 
 export default function LeadDetail() {
     const { leadId } = useParams();
@@ -103,12 +104,19 @@ export default function LeadDetail() {
             console.log('Follow-ups response:', response);
 
             if (response && response.data) {
+                // Check if response.data is an array or if it has a data property that is an array
+                const followUpsArray = Array.isArray(response.data)
+                    ? response.data
+                    : (response.data.data && Array.isArray(response.data.data) ? response.data.data : []);
+
+                console.log('Follow-ups array:', followUpsArray);
+
                 // Transform the API response to match our component's data structure
-                const formattedFollowUps = response.data.map(followUp => ({
+                const formattedFollowUps = followUpsArray.map(followUp => ({
                     id: followUp._id,
                     type: followUp.type || 'call',
-                    title: followUp.title || `${followUp.type} follow-up`,
-                    dueDate: new Date(followUp.dueDate),
+                    title: followUp.title || `${followUp.type || 'General'} follow-up`,
+                    dueDate: new Date(followUp.nextFollowUpDate || followUp.dueDate),
                     notes: followUp.notes || '',
                     completed: followUp.completed || false
                 }));
@@ -222,21 +230,83 @@ export default function LeadDetail() {
                 history: [...prevLead.history, newHistoryEntry]
             }));
 
-            // Save the change to the backend
-            const response = await leadsAPI.update(leadId, {
+            // Prepare data for the update
+            const updateData = {
                 status: newStatus,
                 // Include the new history entry
                 history: [...lead.history, newHistoryEntry]
-            });
+            };
 
-            console.log('Status update response:', response);
+            // If status is being changed to Closed, add additional data
+            if (newStatus === 'Closed') {
+                // Add conversion date
+                updateData.conversionDate = new Date().toISOString();
+
+                // Add last contact date if not already set
+                if (!lead.lastContact) {
+                    updateData.lastContact = new Date().toISOString();
+                }
+            }
+
+            console.log('Updating lead with data:', updateData);
+
+            // Try using enhancedAPI first for better error handling
+            try {
+                const response = await enhancedAPI.leads.update(leadId, updateData);
+                console.log('Status update response (enhancedAPI):', response);
+            } catch (enhancedApiError) {
+                console.warn('enhancedAPI update failed, falling back to leadsAPI:', enhancedApiError);
+                // Fall back to leadsAPI if enhancedAPI fails
+                const response = await leadsAPI.update(leadId, updateData);
+                console.log('Status update response (leadsAPI fallback):', response);
+            }
 
             // Show success message
             toast.success(`Lead status updated to ${newStatus}`);
 
+            // Notify dashboard updater about the status change
+            try {
+                // Create notification data
+                const notificationData = {
+                    id: leadId,
+                    name: lead.name,
+                    status: newStatus
+                };
+
+                // Use the dashboardUpdater utility
+                notifyLeadStatusChanged(notificationData);
+
+                console.log('Lead status change notification sent');
+            } catch (notifyError) {
+                console.warn('Failed to send status change notification:', notifyError);
+            }
+
         } catch (err) {
             console.error('Error updating lead status:', err);
-            toast.error('Failed to update status: ' + (err.message || 'Unknown error'));
+
+            // Extract the most useful error message
+            let errorMessage = 'Failed to update status';
+
+            if (err.data && err.data.error) {
+                // Backend validation error
+                errorMessage += ': ' + err.data.error;
+            } else if (err.message) {
+                // Standard error message
+                errorMessage += ': ' + err.message;
+            } else if (typeof err === 'string') {
+                // String error
+                errorMessage += ': ' + err;
+            }
+
+            // Log detailed error information for debugging
+            console.log('Detailed error information:', {
+                message: err.message,
+                data: err.data,
+                status: err.status,
+                originalError: err.originalError
+            });
+
+            toast.error(errorMessage);
 
             // Revert the optimistic update if the API call fails
             fetchLeadData();
@@ -247,7 +317,10 @@ export default function LeadDetail() {
         switch(status) {
             case 'New': return 'bg-blue-100 text-blue-800';
             case 'Contacted': return 'bg-yellow-100 text-yellow-800';
-            case 'Converted': return 'bg-green-100 text-green-800';
+            case 'Qualified': return 'bg-indigo-100 text-indigo-800';
+            case 'Proposal': return 'bg-purple-100 text-purple-800';
+            case 'Negotiation': return 'bg-orange-100 text-orange-800';
+            case 'Closed': return 'bg-green-100 text-green-800';
             case 'Lost': return 'bg-red-100 text-red-800';
             default: return 'bg-gray-100 text-gray-800';
         }
@@ -351,10 +424,28 @@ export default function LeadDetail() {
                                     Contacted
                                 </button>
                                 <button
-                                    onClick={() => handleStatusChange('Converted')}
+                                    onClick={() => handleStatusChange('Qualified')}
                                     className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                                 >
-                                    Converted
+                                    Qualified
+                                </button>
+                                <button
+                                    onClick={() => handleStatusChange('Proposal')}
+                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                >
+                                    Proposal
+                                </button>
+                                <button
+                                    onClick={() => handleStatusChange('Negotiation')}
+                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                >
+                                    Negotiation
+                                </button>
+                                <button
+                                    onClick={() => handleStatusChange('Closed')}
+                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                >
+                                    Closed
                                 </button>
                                 <button
                                     onClick={() => handleStatusChange('Lost')}
