@@ -25,7 +25,7 @@ import Team from './Components/Admin_Panel/Team'
 import Report from './Components/Admin_Panel/Report'
 import Calls from './Components/Admin_Panel/Calls'
 import Reminder from './Components/Admin_Panel/Reminder'
-import Dashhome from './Components/Admin_Panel/DashboardHome'
+import DashboardHome from './Components/Admin_Panel/DashboardHome'
 
 // Manager Panel Components
 import ManagerDashboard from './Components/Manager_Panel/Dashboard'
@@ -34,7 +34,6 @@ import EmployeeList from './Components/Manager_Panel/EmployeeList'
 import AssignLeads from './Components/Manager_Panel/AssignleadsFixed'
 import AssignedLeads from './Components/Manager_Panel/AssignedLeads'
 import Reports from './Components/Manager_Panel/ReportsFixed'
-import PerformanceMonitor from './Components/Manager_Panel/PerformanceMonitor'
 import PerformanceAnalytics from './Components/Manager_Panel/PerformanceAnalytics'
 import MessageSystem from './Components/Manager_Panel/MessageSystem'
 import TestEmployees from './Components/Manager_Panel/TestEmployees'
@@ -42,7 +41,7 @@ import TestAssignedLeads from './Components/Manager_Panel/TestAssignedLeads'
 
 // Employee Panel Components
 import EmployeeDashboard from './Components/Employee_Panel/Dashboard'
-import DashboardHome from './Components/Employee_Panel/DashboardHome' // Updated to show only assigned leads
+import EmployeeDashboardHome from './Components/Employee_Panel/DashboardHome' // Updated to show only assigned leads
 import LeadsList from './Components/Employee_Panel/LeadsList'
 import LeadDetail from './Components/Employee_Panel/LeadDetail'
 import FollowUps from './Components/Employee_Panel/FollowUps'
@@ -107,13 +106,13 @@ function App() {
           {/* Admin Panel Routes - Protected for admin role */}
           <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
             <Route path='/dashboard-panel' element={<Dashboard/>}>
-              <Route index element={<Dashhome/>}/>
+              <Route index element={<DashboardHome/>}/>
               <Route path='lead' element={<Leads/>}/>
               <Route path='reminder' element={<Reminder/>}/>
               <Route path='team' element={<Team/>}/>
               <Route path='report' element={<Report/>}/>
               <Route path='calls' element={<Calls/>}/>
-              <Route path='performance' element={<PerformanceMonitor/>}/>
+
               <Route path='messages' element={<MessageSystem/>}/>
             </Route>
           </Route>
@@ -127,7 +126,7 @@ function App() {
               <Route path='/manager-panel/assigned-leads' element={<AssignedLeads/>}/>
               <Route path='/manager-panel/performance' element={<PerformanceAnalytics/>}/>
               <Route path='/manager-panel/reports' element={<Reports/>}/>
-              <Route path='/manager-panel/messages' element={<MessageSystem/>}/>
+
               <Route path='/manager-panel/test-employees' element={<TestEmployees/>}/>
               <Route path='/manager-panel/test-assigned-leads' element={<TestAssignedLeads/>}/>
             </Route>
@@ -136,7 +135,7 @@ function App() {
           {/* Employee Panel Routes - Protected for employee role */}
           <Route element={<ProtectedRoute allowedRoles={['employee', 'manager', 'admin']} />}>
             <Route path='/employee-panel' element={<EmployeeDashboard/>}>
-              <Route index element={<DashboardHome/>}/>
+              <Route index element={<EmployeeDashboardHome/>}/>
               <Route path='/employee-panel/leads' element={<LeadsList/>}/>
               <Route path='/employee-panel/leads/:leadId' element={<LeadDetail/>}/>
               <Route path='/employee-panel/follow-ups' element={<FollowUps/>}/>

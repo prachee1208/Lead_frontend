@@ -192,8 +192,13 @@ export const dataFetcher = {
    * @returns {Promise<Array>} - Array of leads
    */
   fetchLeads: (params = {}, options = {}) => {
-    const key = `leads:${JSON.stringify(params)}`;
-    return dataFetcher.fetch(key, () => enhancedAPI.leads.getAll(params), options);
+    // Ensure we have a high limit to get all leads
+    const enhancedParams = {
+      ...params,
+      limit: params.limit || 100 // Default to 100 if not specified
+    };
+    const key = `leads:${JSON.stringify(enhancedParams)}`;
+    return dataFetcher.fetch(key, () => enhancedAPI.leads.getAll(enhancedParams), options);
   },
 
   /**

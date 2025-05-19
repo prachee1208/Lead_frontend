@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8000/api';
+const API_URL = 'https://lead-backend-jcyc.onrender.com/api';
 
 // Create axios instance with default config
 const api = axios.create({
@@ -36,7 +36,8 @@ export const leadsAPI = {
   // Get all leads with optional filters
   getAll: async (params = {}) => {
     try {
-      const response = await api.get('/leads');
+      // Ensure we're passing the params to the API
+      const response = await api.get('/leads', { params });
       return response;
     } catch (error) {
       throw error.response?.data || error.message;

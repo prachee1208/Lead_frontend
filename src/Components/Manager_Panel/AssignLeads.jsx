@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     UserPlus, Search, Filter, Check, X,
     ArrowLeft, ArrowRight, ChevronDown, ChevronUp,
@@ -25,6 +25,10 @@ export default function AssignLeads() {
     const [isLoadingLeads, setIsLoadingLeads] = useState(false);
     const [isAssigning, setIsAssigning] = useState(false);
     const [error, setError] = useState(null);
+
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(1);
+    const [leadsPerPage, setLeadsPerPage] = useState(20); // Show 20 leads per page by default
 
     // Mock data - in a real app, this would come from your API
     const [leads, setLeads] = useState([
@@ -126,7 +130,8 @@ export default function AssignLeads() {
         setIsLoadingLeads(true);
         setError(null);
         try {
-            const response = await leadsAPI.getAll();
+            // Use a high limit to ensure we get all leads
+            const response = await leadsAPI.getAll({ limit: 1000 });
             console.log('Leads API response:', response);
 
             if (response && response.data && response.data.data) {
@@ -278,7 +283,30 @@ export default function AssignLeads() {
         }
     };
 
+    // Function to select all leads on the current page
     const selectAllLeads = () => {
+        // Get the leads on the current page
+        const currentPageLeads = filteredAndSortedLeads
+            .slice((currentPage - 1) * leadsPerPage, currentPage * leadsPerPage)
+            .map(lead => lead.id);
+
+        // Check if all leads on the current page are already selected
+        const allCurrentPageLeadsSelected = currentPageLeads.every(id => selectedLeads.includes(id));
+
+        if (allCurrentPageLeadsSelected) {
+            // If all leads on the current page are selected, deselect them
+            setSelectedLeads(selectedLeads.filter(id => !currentPageLeads.includes(id)));
+        } else {
+            // If not all leads on the current page are selected, select them all
+            // First, remove any current page leads that might already be selected to avoid duplicates
+            const leadsWithoutCurrentPage = selectedLeads.filter(id => !currentPageLeads.includes(id));
+            // Then add all current page leads
+            setSelectedLeads([...leadsWithoutCurrentPage, ...currentPageLeads]);
+        }
+    };
+
+    // Function to select all leads across all pages
+    const selectAllLeadsAllPages = () => {
         if (selectedLeads.length === filteredAndSortedLeads.length) {
             setSelectedLeads([]);
         } else {
@@ -587,12 +615,33 @@ export default function AssignLeads() {
                                     </div>
                                 </div>
                                 {!isLoadingLeads && filteredAndSortedLeads.length > 0 && (
-                                    <button
-                                        onClick={selectAllLeads}
-                                        className="text-sm text-indigo-600 hover:text-indigo-800"
-                                    >
-                                        {selectedLeads.length === filteredAndSortedLeads.length ? 'Deselect All' : 'Select All'}
-                                    </button>
+                                    <div className="flex items-center space-x-3">
+                                        <button
+                                            onClick={selectAllLeads}
+                                            className="text-sm text-indigo-600 hover:text-indigo-800"
+                                        >
+                                            {filteredAndSortedLeads
+                                                .slice((currentPage - 1) * leadsPerPage, currentPage * leadsPerPage)
+                                                .every(lead => selectedLeads.includes(lead.id))
+                                                ? 'Deselect Page'
+                                                : 'Select Page'
+                                            }
+                                        </button>
+                                        <button
+                                            onClick={selectAllLeadsAllPages}
+                                            className="text-sm text-indigo-600 hover:text-indigo-800"
+                                        >
+                                            {selectedLeads.length === filteredAndSortedLeads.length
+                                                ? 'Deselect All'
+                                                : 'Select All Leads'
+                                            }
+                                        </button>
+                                        {selectedLeads.length > 0 && (
+                                            <span className="text-xs text-gray-500">
+                                                ({selectedLeads.length} selected)
+                                            </span>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         </div>
@@ -610,9 +659,16 @@ export default function AssignLeads() {
                                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-10">
                                                 <input
                                                     type="checkbox"
-                                                    checked={selectedLeads.length === filteredAndSortedLeads.length && filteredAndSortedLeads.length > 0}
+                                                    // Check if all leads on the current page are selected
+                                                    checked={
+                                                        filteredAndSortedLeads
+                                                            .slice((currentPage - 1) * leadsPerPage, currentPage * leadsPerPage)
+                                                            .every(lead => selectedLeads.includes(lead.id)) &&
+                                                        filteredAndSortedLeads.length > 0
+                                                    }
                                                     onChange={selectAllLeads}
                                                     className="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                                    title="Select all leads on this page"
                                                 />
                                             </th>
                                             <th
@@ -664,7 +720,10 @@ export default function AssignLeads() {
                                                 </td>
                                             </tr>
                                         ) : (
-                                            filteredAndSortedLeads.map(lead => (
+                                            // Apply pagination to the filtered and sorted leads
+                                            filteredAndSortedLeads
+                                                .slice((currentPage - 1) * leadsPerPage, currentPage * leadsPerPage)
+                                                .map(lead => (
                                                 <tr
                                                     key={lead.id}
                                                     className={`hover:bg-gray-50 ${selectedLeads.includes(lead.id) ? 'bg-indigo-50' : ''}`}
@@ -709,6 +768,90 @@ export default function AssignLeads() {
                                         )}
                                     </tbody>
                                 </table>
+
+                                {/* Pagination Controls */}
+                                {filteredAndSortedLeads.length > leadsPerPage && (
+                                    <div className="px-6 py-4 border-t border-gray-200">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center space-x-2">
+                                                <span className="text-sm text-gray-700">
+                                                    Showing {Math.min(filteredAndSortedLeads.length, (currentPage - 1) * leadsPerPage + 1)} to {Math.min(filteredAndSortedLeads.length, currentPage * leadsPerPage)} of {filteredAndSortedLeads.length} leads
+                                                </span>
+                                                <select
+                                                    className="border border-gray-300 rounded-md text-sm p-1"
+                                                    value={leadsPerPage}
+                                                    onChange={(e) => {
+                                                        setLeadsPerPage(Number(e.target.value));
+                                                        setCurrentPage(1); // Reset to first page when changing page size
+                                                    }}
+                                                >
+                                                    <option value={10}>10 per page</option>
+                                                    <option value={20}>20 per page</option>
+                                                    <option value={50}>50 per page</option>
+                                                    <option value={100}>100 per page</option>
+                                                    <option value={1000}>All</option>
+                                                </select>
+                                            </div>
+
+                                            <div className="flex items-center space-x-2">
+                                                <button
+                                                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                                                    disabled={currentPage === 1}
+                                                    className={`p-2 rounded-md ${
+                                                        currentPage === 1
+                                                            ? 'text-gray-400 cursor-not-allowed'
+                                                            : 'text-gray-700 hover:bg-gray-100'
+                                                    }`}
+                                                >
+                                                    <ArrowLeft size={16} />
+                                                </button>
+
+                                                <div className="flex items-center space-x-1">
+                                                    {Array.from({ length: Math.ceil(filteredAndSortedLeads.length / leadsPerPage) }, (_, i) => i + 1)
+                                                        .filter(page => {
+                                                            // Show first page, last page, current page, and pages around current page
+                                                            const totalPages = Math.ceil(filteredAndSortedLeads.length / leadsPerPage);
+                                                            return page === 1 ||
+                                                                page === totalPages ||
+                                                                (page >= currentPage - 1 && page <= currentPage + 1);
+                                                        })
+                                                        .map((page, index, array) => (
+                                                            <React.Fragment key={page}>
+                                                                {index > 0 && array[index - 1] !== page - 1 && (
+                                                                    <span className="px-2 py-1 text-gray-500">...</span>
+                                                                )}
+                                                                <button
+                                                                    onClick={() => setCurrentPage(page)}
+                                                                    className={`px-3 py-1 rounded-md ${
+                                                                        currentPage === page
+                                                                            ? 'bg-indigo-100 text-indigo-700 font-medium'
+                                                                            : 'text-gray-700 hover:bg-gray-100'
+                                                                    }`}
+                                                                >
+                                                                    {page}
+                                                                </button>
+                                                            </React.Fragment>
+                                                        ))
+                                                    }
+                                                </div>
+
+                                                <button
+                                                    onClick={() => setCurrentPage(prev =>
+                                                        Math.min(prev + 1, Math.ceil(filteredAndSortedLeads.length / leadsPerPage))
+                                                    )}
+                                                    disabled={currentPage >= Math.ceil(filteredAndSortedLeads.length / leadsPerPage)}
+                                                    className={`p-2 rounded-md ${
+                                                        currentPage >= Math.ceil(filteredAndSortedLeads.length / leadsPerPage)
+                                                            ? 'text-gray-400 cursor-not-allowed'
+                                                            : 'text-gray-700 hover:bg-gray-100'
+                                                    }`}
+                                                >
+                                                    <ArrowRight size={16} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>

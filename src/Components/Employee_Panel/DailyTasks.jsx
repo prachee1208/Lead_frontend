@@ -1,15 +1,24 @@
-import { useState } from 'react';
-import { 
-    CheckCircle, Circle, Plus, Trash2, Clock, 
+import { useState, useEffect } from 'react';
+import {
+    CheckCircle, Circle, Plus, Trash2, Clock,
     Calendar, ArrowUp, ArrowDown, Filter, Search,
-    User, Phone, Mail, MessageSquare
+    User, Phone, Mail, MessageSquare, Loader, AlertCircle,
+    RefreshCw
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { enhancedAPI } from '../../services/enhancedAPI';
+import { toast } from 'react-toastify';
+import ConnectionMonitor from '../common/ConnectionMonitor';
 
 export default function DailyTasks() {
     const [filter, setFilter] = useState('all');
     const [searchTerm, setSearchTerm] = useState('');
     const [isAddingTask, setIsAddingTask] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [tasks, setTasks] = useState([]);
+    const [leads, setLeads] = useState([]);
+    const [isLoadingLeads, setIsLoadingLeads] = useState(true);
     const [newTask, setNewTask] = useState({
         description: '',
         priority: 'medium',
@@ -17,102 +26,164 @@ export default function DailyTasks() {
         dueDate: new Date().toISOString().split('T')[0]
     });
 
-    // Mock data - in a real app, this would come from your API
-    const initialTasks = [
-        { 
-            id: 1, 
-            description: 'Call John Smith to discuss proposal details', 
-            completed: false, 
-            priority: 'high',
-            createdAt: '2023-05-15',
-            dueDate: '2023-05-16',
-            relatedLeadId: 1,
-            relatedLeadName: 'John Smith',
-            relatedLeadCompany: 'Acme Corp'
-        },
-        { 
-            id: 2, 
-            description: 'Send follow-up email to Sarah Johnson', 
-            completed: true, 
-            priority: 'medium',
-            createdAt: '2023-05-14',
-            dueDate: '2023-05-15',
-            relatedLeadId: 2,
-            relatedLeadName: 'Sarah Johnson',
-            relatedLeadCompany: 'XYZ Inc'
-        },
-        { 
-            id: 3, 
-            description: 'Prepare presentation for Michael Brown meeting', 
-            completed: false, 
-            priority: 'high',
-            createdAt: '2023-05-15',
-            dueDate: '2023-05-17',
-            relatedLeadId: 5,
-            relatedLeadName: 'Michael Brown',
-            relatedLeadCompany: 'Innovate LLC'
-        },
-        { 
-            id: 4, 
-            description: 'Update lead status for recent contacts', 
-            completed: false, 
-            priority: 'low',
-            createdAt: '2023-05-13',
-            dueDate: '2023-05-15',
-            relatedLeadId: null,
-            relatedLeadName: null,
-            relatedLeadCompany: null
-        },
-        { 
-            id: 5, 
-            description: 'Review product documentation for Tech Solutions demo', 
-            completed: false, 
-            priority: 'medium',
-            createdAt: '2023-05-14',
-            dueDate: '2023-05-16',
-            relatedLeadId: 3,
-            relatedLeadName: 'Robert Chen',
-            relatedLeadCompany: 'Tech Solutions'
-        },
-    ];
+    // Fetch tasks from the database
+    const fetchTasks = async () => {
+        setIsLoading(true);
+        setError(null);
 
-    // Mock leads data for the dropdown
-    const leads = [
-        { id: 1, name: 'John Smith', company: 'Acme Corp' },
-        { id: 2, name: 'Sarah Johnson', company: 'XYZ Inc' },
-        { id: 3, name: 'Robert Chen', company: 'Tech Solutions' },
-        { id: 4, name: 'Emily Davis', company: 'Global Services' },
-        { id: 5, name: 'Michael Brown', company: 'Innovate LLC' }
-    ];
+        try {
+            // Get the current user ID from localStorage
+            const userId = localStorage.getItem('userId');
 
-    const [tasks, setTasks] = useState(initialTasks);
+            if (!userId) {
+                console.warn('User ID not found in localStorage');
+                setIsLoading(false);
+                setError('User ID not found. Please log in again.');
+                return;
+            }
+
+            // Fetch reminders/tasks for the current employee
+            const response = await enhancedAPI.reminders.getAll();
+            console.log('Tasks/Reminders response:', response);
+
+            if (response && response.data) {
+                // Filter tasks for the current user
+                const userTasks = response.data.filter(task => task.employeeId === userId);
+
+                // Transform the API response to match our component's data structure
+                const formattedTasks = userTasks.map(task => ({
+                    id: task._id,
+                    description: task.description,
+                    completed: task.completed || false,
+                    priority: task.priority || 'medium',
+                    createdAt: new Date(task.createdAt).toISOString().split('T')[0],
+                    dueDate: new Date(task.dueDate).toISOString().split('T')[0],
+                    relatedLeadId: task.leadId || null,
+                    relatedLeadName: task.leadName || null,
+                    relatedLeadCompany: task.company || null
+                }));
+
+                setTasks(formattedTasks);
+            } else {
+                // If no data is returned, use empty array
+                setTasks([]);
+            }
+        } catch (err) {
+            console.error('Error fetching tasks:', err);
+            setError('Failed to load tasks. Please try again.');
+            toast.error('Failed to load tasks: ' + (err.message || 'Unknown error'));
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // Fetch leads from the database
+    const fetchLeads = async () => {
+        setIsLoadingLeads(true);
+
+        try {
+            // Get the current user ID from localStorage
+            const userId = localStorage.getItem('userId');
+
+            if (!userId) {
+                console.warn('User ID not found in localStorage');
+                setIsLoadingLeads(false);
+                return;
+            }
+
+            // Fetch leads assigned to the current employee
+            const response = await enhancedAPI.leads.getByEmployee(userId);
+            console.log('Leads response:', response);
+
+            if (response && response.data && response.data.data) {
+                // Transform the API response to match our component's data structure
+                const formattedLeads = response.data.data.map(lead => ({
+                    id: lead._id,
+                    name: lead.name,
+                    company: lead.company || 'N/A'
+                }));
+
+                setLeads(formattedLeads);
+            } else {
+                // If no data is returned, use empty array
+                setLeads([]);
+            }
+        } catch (err) {
+            console.error('Error fetching leads:', err);
+            toast.error('Failed to load leads: ' + (err.message || 'Unknown error'));
+        } finally {
+            setIsLoadingLeads(false);
+        }
+    };
+
+    // Load data on component mount
+    useEffect(() => {
+        fetchTasks();
+        fetchLeads();
+    }, []);
 
     const filteredTasks = tasks.filter(task => {
         // Apply search filter
-        const matchesSearch = 
+        const matchesSearch =
             task.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
             (task.relatedLeadName && task.relatedLeadName.toLowerCase().includes(searchTerm.toLowerCase())) ||
             (task.relatedLeadCompany && task.relatedLeadCompany.toLowerCase().includes(searchTerm.toLowerCase()));
-        
+
         // Apply status filter
-        const matchesFilter = 
-            filter === 'all' || 
-            (filter === 'completed' && task.completed) || 
+        const matchesFilter =
+            filter === 'all' ||
+            (filter === 'completed' && task.completed) ||
             (filter === 'pending' && !task.completed) ||
             (filter === 'high' && task.priority === 'high') ||
             (filter === 'today' && task.dueDate === new Date().toISOString().split('T')[0]);
-        
+
         return matchesSearch && matchesFilter;
     });
 
-    const toggleTaskCompletion = (taskId) => {
-        setTasks(tasks.map(task => 
-            task.id === taskId ? { ...task, completed: !task.completed } : task
-        ));
+    const toggleTaskCompletion = async (taskId) => {
+        try {
+            // Optimistically update UI
+            setTasks(tasks.map(task =>
+                task.id === taskId ? { ...task, completed: !task.completed } : task
+            ));
+
+            // Update in the database
+            const response = await enhancedAPI.reminders.toggleComplete(taskId);
+            console.log('Toggle task completion response:', response);
+
+            toast.success('Task status updated successfully');
+        } catch (err) {
+            console.error('Error updating task status:', err);
+            toast.error('Failed to update task status: ' + (err.message || 'Unknown error'));
+
+            // Revert the optimistic update
+            setTasks(tasks.map(task =>
+                task.id === taskId ? { ...task, completed: !task.completed } : task
+            ));
+
+            // Refresh tasks to ensure consistency
+            fetchTasks();
+        }
     };
 
-    const deleteTask = (taskId) => {
-        setTasks(tasks.filter(task => task.id !== taskId));
+    const deleteTask = async (taskId) => {
+        try {
+            // Optimistically update UI
+            const deletedTask = tasks.find(task => task.id === taskId);
+            setTasks(tasks.filter(task => task.id !== taskId));
+
+            // Delete from the database
+            const response = await enhancedAPI.reminders.delete(taskId);
+            console.log('Delete task response:', response);
+
+            toast.success('Task deleted successfully');
+        } catch (err) {
+            console.error('Error deleting task:', err);
+            toast.error('Failed to delete task: ' + (err.message || 'Unknown error'));
+
+            // Refresh tasks to ensure consistency
+            fetchTasks();
+        }
     };
 
     const handleInputChange = (e) => {
@@ -123,43 +194,81 @@ export default function DailyTasks() {
         });
     };
 
-    const handleAddTask = () => {
+    const handleAddTask = async () => {
         if (!newTask.description.trim()) {
-            alert('Please enter a task description');
+            toast.error('Please enter a task description');
             return;
         }
 
-        let relatedLeadName = null;
-        let relatedLeadCompany = null;
+        try {
+            // Get the current user ID from localStorage
+            const userId = localStorage.getItem('userId');
 
-        if (newTask.relatedLeadId) {
-            const selectedLead = leads.find(lead => lead.id === parseInt(newTask.relatedLeadId));
-            if (selectedLead) {
-                relatedLeadName = selectedLead.name;
-                relatedLeadCompany = selectedLead.company;
+            if (!userId) {
+                toast.error('User ID not found. Please log in again.');
+                return;
             }
+
+            let relatedLeadName = null;
+            let relatedLeadCompany = null;
+
+            if (newTask.relatedLeadId) {
+                const selectedLead = leads.find(lead => lead.id === newTask.relatedLeadId);
+                if (selectedLead) {
+                    relatedLeadName = selectedLead.name;
+                    relatedLeadCompany = selectedLead.company;
+                }
+            }
+
+            // Prepare data for API
+            const taskData = {
+                description: newTask.description,
+                priority: newTask.priority,
+                dueDate: new Date(newTask.dueDate).toISOString(),
+                completed: false,
+                employeeId: userId,
+                leadId: newTask.relatedLeadId || null,
+                leadName: relatedLeadName,
+                company: relatedLeadCompany
+            };
+
+            // Save to API
+            const response = await enhancedAPI.reminders.create(taskData);
+            console.log('Create task response:', response);
+
+            if (response && response.data) {
+                // Format the new task for our component
+                const formattedTask = {
+                    id: response.data._id,
+                    description: response.data.description,
+                    completed: false,
+                    priority: response.data.priority,
+                    createdAt: new Date().toISOString().split('T')[0],
+                    dueDate: new Date(response.data.dueDate).toISOString().split('T')[0],
+                    relatedLeadId: response.data.leadId,
+                    relatedLeadName: response.data.leadName,
+                    relatedLeadCompany: response.data.company
+                };
+
+                // Add to state
+                setTasks([...tasks, formattedTask]);
+                toast.success('Task added successfully');
+
+                // Reset form
+                setNewTask({
+                    description: '',
+                    priority: 'medium',
+                    relatedLeadId: '',
+                    dueDate: new Date().toISOString().split('T')[0]
+                });
+                setIsAddingTask(false);
+            } else {
+                throw new Error('Failed to create task');
+            }
+        } catch (err) {
+            console.error('Error creating task:', err);
+            toast.error('Failed to create task: ' + (err.message || 'Unknown error'));
         }
-
-        const newTaskItem = {
-            id: tasks.length + 1,
-            description: newTask.description,
-            completed: false,
-            priority: newTask.priority,
-            createdAt: new Date().toISOString().split('T')[0],
-            dueDate: newTask.dueDate,
-            relatedLeadId: newTask.relatedLeadId ? parseInt(newTask.relatedLeadId) : null,
-            relatedLeadName,
-            relatedLeadCompany
-        };
-
-        setTasks([...tasks, newTaskItem]);
-        setNewTask({
-            description: '',
-            priority: 'medium',
-            relatedLeadId: '',
-            dueDate: new Date().toISOString().split('T')[0]
-        });
-        setIsAddingTask(false);
     };
 
     const getPriorityColor = (priority) => {
@@ -182,16 +291,45 @@ export default function DailyTasks() {
 
     return (
         <div className="space-y-6">
+            {/* Connection status monitor */}
+            <ConnectionMonitor />
+
             <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-semibold text-gray-800">Daily Tasks</h1>
-                <button 
-                    onClick={() => setIsAddingTask(true)}
-                    className="px-4 py-2 bg-[#022d38] text-white rounded-md hover:bg-[#043c4a] flex items-center"
-                >
-                    <Plus size={16} className="mr-2" />
-                    Add Task
-                </button>
+                <div className="flex items-center space-x-2">
+                    {!isLoading && (
+                        <button
+                            onClick={fetchTasks}
+                            className="p-2 rounded-md hover:bg-gray-100"
+                            title="Refresh tasks"
+                        >
+                            <RefreshCw size={20} className="text-gray-500" />
+                        </button>
+                    )}
+                    <button
+                        onClick={() => setIsAddingTask(true)}
+                        className="px-4 py-2 bg-[#022d38] text-white rounded-md hover:bg-[#043c4a] flex items-center"
+                        disabled={isLoading}
+                    >
+                        <Plus size={16} className="mr-2" />
+                        Add Task
+                    </button>
+                </div>
             </div>
+
+            {/* Error Message */}
+            {error && (
+                <div className="bg-red-100 border border-red-200 text-red-800 px-4 py-3 rounded-md flex items-center">
+                    <AlertCircle size={20} className="mr-2" />
+                    <span>{error}</span>
+                    <button
+                        onClick={fetchTasks}
+                        className="ml-auto text-red-800 hover:text-red-900"
+                    >
+                        <RefreshCw size={16} />
+                    </button>
+                </div>
+            )}
 
             {/* Add New Task Form */}
             {isAddingTask && (
@@ -236,19 +374,32 @@ export default function DailyTasks() {
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Related Lead (Optional)</label>
-                                <select
-                                    name="relatedLeadId"
-                                    value={newTask.relatedLeadId}
-                                    onChange={handleInputChange}
-                                    className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#022d38] focus:border-[#022d38]"
-                                >
-                                    <option value="">None</option>
-                                    {leads.map(lead => (
-                                        <option key={lead.id} value={lead.id}>
-                                            {lead.name} - {lead.company}
-                                        </option>
-                                    ))}
-                                </select>
+                                <div className="relative">
+                                    <select
+                                        name="relatedLeadId"
+                                        value={newTask.relatedLeadId}
+                                        onChange={handleInputChange}
+                                        className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#022d38] focus:border-[#022d38]"
+                                        disabled={isLoadingLeads}
+                                    >
+                                        <option value="">None</option>
+                                        {leads.map(lead => (
+                                            <option key={lead.id} value={lead.id}>
+                                                {lead.name} - {lead.company}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {isLoadingLeads && (
+                                        <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+                                            <Loader size={16} className="text-gray-400 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                                {leads.length === 0 && !isLoadingLeads && (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        No leads assigned to you yet
+                                    </p>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -341,12 +492,20 @@ export default function DailyTasks() {
 
             {/* Tasks List */}
             <div className="bg-white rounded-lg shadow overflow-hidden">
-                {filteredTasks.length === 0 ? (
+                {isLoading ? (
+                    <div className="flex flex-col items-center justify-center min-h-[60vh] p-6">
+                        <Loader className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+                        <h2 className="text-xl font-semibold text-gray-700">Loading Tasks...</h2>
+                        <p className="text-gray-500 mt-2">Please wait while we fetch your tasks</p>
+                    </div>
+                ) : filteredTasks.length === 0 ? (
                     <div className="text-center py-12">
                         <CheckCircle size={48} className="mx-auto text-gray-300 mb-4" />
                         <h3 className="text-lg font-medium text-gray-900">No tasks found</h3>
                         <p className="mt-1 text-sm text-gray-500">
-                            {searchTerm ? "Try adjusting your search or filter" : "You're all caught up!"}
+                            {searchTerm || filter !== 'all'
+                                ? "Try adjusting your search or filter"
+                                : "You're all caught up!"}
                         </p>
                     </div>
                 ) : (
@@ -389,7 +548,7 @@ export default function DailyTasks() {
                                             {task.relatedLeadId && (
                                                 <div className="ml-4 flex items-center">
                                                     <User size={12} className="mr-1" />
-                                                    <Link 
+                                                    <Link
                                                         to={`/employee-panel/leads/${task.relatedLeadId}`}
                                                         className="text-blue-500 hover:underline"
                                                     >
@@ -400,21 +559,21 @@ export default function DailyTasks() {
                                         </div>
                                         {task.relatedLeadId && (
                                             <div className="mt-2 flex space-x-2">
-                                                <Link 
+                                                <Link
                                                     to={`/employee-panel/leads/${task.relatedLeadId}/contact/phone`}
                                                     className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100"
                                                 >
                                                     <Phone size={12} className="mr-1" />
                                                     Call
                                                 </Link>
-                                                <Link 
+                                                <Link
                                                     to={`/employee-panel/leads/${task.relatedLeadId}/contact/email`}
                                                     className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-md bg-green-50 text-green-700 hover:bg-green-100"
                                                 >
                                                     <Mail size={12} className="mr-1" />
                                                     Email
                                                 </Link>
-                                                <Link 
+                                                <Link
                                                     to={`/employee-panel/leads/${task.relatedLeadId}/contact/message`}
                                                     className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-md bg-orange-50 text-orange-700 hover:bg-orange-100"
                                                 >

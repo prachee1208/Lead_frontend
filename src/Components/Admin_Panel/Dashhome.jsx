@@ -6,7 +6,7 @@ import {
     Bell, User, LogOut, ChevronDown, Search,
     Filter, Menu, X, Mail, CheckCircle
 } from 'lucide-react';
-import { Link, Outlet } from 'react-router-dom';
+import { Link, Outlet, useNavigate } from 'react-router-dom';
 // import { Link,useLocation } from 'react-router-dom';
 
 // Mock data for dashboard
@@ -46,6 +46,38 @@ const StatusBadge = ({ status }) => {
         <span className={`text-xs font-medium px-2 py-1 rounded-full ${colors[status]}`}>
             {status}
         </span>
+    );
+};
+
+// SidebarLogout component
+const SidebarLogout = () => {
+    const navigate = useNavigate();
+
+    const handleLogout = () => {
+        // Show confirmation dialog
+        if (window.confirm('Are you sure you want to logout?')) {
+            // Clear user data
+            localStorage.removeItem('userRole');
+            localStorage.removeItem('userName');
+            localStorage.removeItem('userEmail');
+            localStorage.removeItem('userId');
+            localStorage.removeItem('token');
+
+            // Redirect to login page
+            navigate('/login');
+        }
+    };
+
+    return (
+        <div className="px-4 mb-2">
+            <button
+                onClick={handleLogout}
+                className="w-full flex items-center space-x-2 py-2 px-2 rounded-md text-indigo-200 hover:bg-indigo-800 hover:text-white transition-colors duration-200"
+            >
+                <LogOut size={18} />
+                <span>Logout</span>
+            </button>
+        </div>
     );
 };
 

@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     BarChart3, Users, UserPlus, PhoneCall,
     Calendar, Clock, List, Home, PieChart,
     Bell, User, LogOut, ChevronDown, Search,
     Filter, Menu, X, Mail, CheckCircle, FileText,
-    MessageSquare, BarChart2, Activity
+    BarChart2, Activity
 } from 'lucide-react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 
@@ -116,28 +116,23 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
                             <span>Reports</span>
                         </NavLink>
                     </li>
-                    <li className="mb-2">
-                        <NavLink
-                            to="/manager-panel/messages"
-                            className={({isActive}) =>
-                                `flex items-center space-x-2 py-2 px-2 rounded-md ${
-                                    isActive
-                                        ? 'bg-white text-[#022d38]'
-                                        : 'text-indigo-200 hover:bg-white hover:text-[#022d38]'
-                                }`
-                            }
-                        >
-                            <MessageSquare size={18} />
-                            <span>Messages</span>
-                        </NavLink>
-                    </li>
+
                 </ul>
             </div>
 
             <div className="p-4 border-t border-[#043c4a] mt-auto">
                 <Link
                     to="/"
-                    onClick={() => localStorage.removeItem('userRole')}
+                    onClick={() => {
+                        // Clear all user-related data from localStorage
+                        localStorage.removeItem('userRole');
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('userName');
+                        localStorage.removeItem('userEmail');
+                        localStorage.removeItem('userId');
+                        localStorage.removeItem('userData');
+                        console.log('User logged out, localStorage cleared');
+                    }}
                     className="flex items-center space-x-2 py-2 px-2 rounded-md text-indigo-200 hover:bg-white hover:text-[#022d38]"
                 >
                     <LogOut size={18} />
@@ -153,6 +148,24 @@ export default function ManagerDashboard() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+    const [userName, setUserName] = useState('Manager');
+    const [userInitials, setUserInitials] = useState('M');
+
+    // Get user data from localStorage on component mount
+    useEffect(() => {
+        const storedName = localStorage.getItem('userName');
+        if (storedName) {
+            setUserName(storedName);
+
+            // Generate initials from name
+            const nameParts = storedName.split(' ');
+            const initials = nameParts.length > 1
+                ? `${nameParts[0][0]}${nameParts[1][0]}`
+                : storedName.substring(0, 2);
+
+            setUserInitials(initials.toUpperCase());
+        }
+    }, []);
 
     const toggleSidebar = () => {
         setIsSidebarOpen(!isSidebarOpen);
@@ -241,9 +254,9 @@ export default function ManagerDashboard() {
                                     onClick={toggleProfileMenu}
                                 >
                                     <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-[#022d38] flex items-center justify-center text-white font-bold">
-                                        M
+                                        {userInitials}
                                     </div>
-                                    <span className="text-sm font-medium text-gray-700 hidden md:block">Manager</span>
+                                    <span className="text-sm font-medium text-gray-700 hidden md:block">{userName}</span>
                                     <ChevronDown size={16} className="text-gray-500 hidden md:block" />
                                 </button>
 
@@ -257,7 +270,16 @@ export default function ManagerDashboard() {
                                         </a>
                                         <a
                                             href="/"
-                                            onClick={() => localStorage.removeItem('userRole')}
+                                            onClick={() => {
+                                                // Clear all user-related data from localStorage
+                                                localStorage.removeItem('userRole');
+                                                localStorage.removeItem('token');
+                                                localStorage.removeItem('userName');
+                                                localStorage.removeItem('userEmail');
+                                                localStorage.removeItem('userId');
+                                                localStorage.removeItem('userData');
+                                                console.log('User logged out, localStorage cleared');
+                                            }}
                                             className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                                         >
                                             Sign out

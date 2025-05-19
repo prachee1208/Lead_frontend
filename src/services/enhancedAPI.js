@@ -2,7 +2,7 @@ import axios from 'axios';
 import { toast } from 'react-toastify';
 
 // Configuration
-const API_URL = 'http://localhost:8000/api';
+const API_URL = 'https://lead-backend-jcyc.onrender.com/api';
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // ms
 const REQUEST_TIMEOUT = 15000; // ms
@@ -184,7 +184,14 @@ const makeRequest = async (method, url, data = null, options = {}) => {
 export const enhancedAPI = {
   // Lead endpoints
   leads: {
-    getAll: (params = {}) => makeRequest('get', '/leads', null, { params }),
+    getAll: (params = {}) => {
+      // Ensure we have a high limit to get all leads
+      const enhancedParams = {
+        ...params,
+        limit: params.limit || 100 // Default to 100 if not specified
+      };
+      return makeRequest('get', '/leads', null, { params: enhancedParams });
+    },
     getById: (id) => makeRequest('get', `/leads/${id}`),
     create: (data) => makeRequest('post', '/leads', data),
     update: (id, data) => makeRequest('put', `/leads/${id}`, data),
@@ -280,6 +287,42 @@ export const enhancedAPI = {
       makeRequest('get', '/performance/lead-status', null, { params: { dateRange } }),
     getConversionTrend: (days = 7) =>
       makeRequest('get', '/performance/conversion-trend', null, { params: { days } }),
+    updateEmployeePerformance: (employeeId, performanceData) =>
+      makeRequest('put', `/users/${employeeId}`, { performance: performanceData }),
+    syncPerformanceData: async () => {
+      try {
+        // Get all employees
+        const employeesResponse = await makeRequest('get', '/users/role/employee');
+
+        // Get all leads
+        const leadsResponse = await makeRequest('get', '/leads');
+
+        if (employeesResponse?.data && leadsResponse?.data) {
+          const employees = employeesResponse.data;
+          const leads = leadsResponse.data;
+
+          // Process and return the data
+          return {
+            success: true,
+            employees,
+            leads,
+            message: 'Performance data synced successfully'
+          };
+        }
+
+        return {
+          success: false,
+          message: 'Failed to sync performance data'
+        };
+      } catch (error) {
+        console.error('Error syncing performance data:', error);
+        return {
+          success: false,
+          message: 'Error syncing performance data',
+          error: error.message || 'Unknown error'
+        };
+      }
+    }
   },
 
   // Reminder endpoints
@@ -290,6 +333,62 @@ export const enhancedAPI = {
     update: (id, data) => makeRequest('put', `/reminders/${id}`, data),
     delete: (id) => makeRequest('delete', `/reminders/${id}`),
     toggleComplete: (id) => makeRequest('patch', `/reminders/${id}/toggle`),
+  },
+
+  // Follow-up endpoints
+  followUps: {
+    getAll: (params = {}) => makeRequest('get', '/follow-ups', null, { params }),
+    getById: (id) => makeRequest('get', `/follow-ups/${id}`),
+    getByLead: (leadId) => makeRequest('get', `/follow-ups/lead/${leadId}`),
+    getByEmployee: (employeeId, params = {}) => makeRequest('get', `/follow-ups/employee/${employeeId}`, null, { params }),
+    create: (data) => makeRequest('post', '/follow-ups', data),
+    update: (id, data) => makeRequest('put', `/follow-ups/${id}`, data),
+    delete: (id) => makeRequest('delete', `/follow-ups/${id}`),
+    markComplete: (id) => makeRequest('patch', `/follow-ups/${id}/complete`),
+
+    // Fallback method to update lead with follow-up data if dedicated endpoint fails
+    addToLead: async (leadId, followUpData) => {
+      try {
+        // Try to use the dedicated follow-up endpoint first
+        const response = await makeRequest('post', '/follow-ups', {
+          ...followUpData,
+          leadId
+        });
+        return response;
+      } catch (error) {
+        console.log('Error using dedicated follow-up endpoint, falling back to lead update:', error);
+
+        // Fall back to updating the lead with the follow-up data
+        try {
+          // Get the current lead data
+          const leadResponse = await makeRequest('get', `/leads/${leadId}`);
+          const lead = leadResponse.data;
+
+          // Add the follow-up to the lead's followUps array
+          const followUps = lead.followUps || [];
+          const newFollowUp = {
+            id: Date.now().toString(), // Generate a unique ID
+            ...followUpData,
+            createdAt: new Date().toISOString()
+          };
+
+          // Update the lead with the new follow-up
+          const updateResponse = await makeRequest('put', `/leads/${leadId}`, {
+            ...lead,
+            followUps: [...followUps, newFollowUp]
+          });
+
+          return {
+            success: true,
+            data: newFollowUp,
+            message: 'Follow-up added to lead successfully (fallback method)'
+          };
+        } catch (fallbackError) {
+          console.error('Fallback method also failed:', fallbackError);
+          throw fallbackError;
+        }
+      }
+    }
   }
 };
 

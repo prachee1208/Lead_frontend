@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Users, Search, Edit, Trash2, MoreHorizontal,
-  BarChart2, Phone, Mail, Award, CheckCircle, AlertCircle, X,
+  Phone, Mail, CheckCircle, AlertCircle, X,
   Eye, UserCog
 } from 'lucide-react';
 import { toast } from 'react-toastify';
@@ -34,12 +34,7 @@ export default function SalesTeamManagement() {
           phone: user.phone || 'N/A',
           role: user.role,
           status: user.status || 'active',
-          avatar: user.name.split(' ').map(name => name[0]).join(''),
-          performance: user.performance || {
-            leadsAssigned: 0,
-            converted: 0,
-            totalValue: 0
-          }
+          avatar: user.name.split(' ').map(name => name[0]).join('')
         }));
         setTeamMembers(users);
       }
@@ -172,26 +167,7 @@ export default function SalesTeamManagement() {
     return matchesSearch;
   });
 
-  const calculateConversionRate = (assigned, converted) => {
-    if (assigned === 0) return '0%';
-    return `${((converted / assigned) * 100).toFixed(1)}%`;
-  };
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(amount);
-  };
-
-  const getStatusColor = (conversionRate) => {
-    const rate = parseFloat(conversionRate);
-    if (rate >= 50) return 'text-green-600';
-    if (rate >= 30) return 'text-yellow-600';
-    return 'text-red-600';
-  };
 
   return (
     <div className="bg-gray-50 min-h-screen  overflow-auto">
@@ -249,24 +225,7 @@ export default function SalesTeamManagement() {
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-lg shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-500">Avg. Conversion</p>
-                <p className="text-2xl font-semibold text-gray-900 mt-1">
-                  {teamMembers.length > 0 ?
-                    (teamMembers.reduce((sum, member) => {
-                      const rate = parseFloat(member.performance.conversionRate);
-                      return sum + (isNaN(rate) ? 0 : rate);
-                    }, 0) / teamMembers.length).toFixed(1) + '%'
-                    : '0%'}
-                </p>
-              </div>
-              <div className="p-3 bg-purple-100 rounded-full">
-                <BarChart2 className="h-6 w-6 text-purple-600" />
-              </div>
-            </div>
-          </div>
+
         </div>
 
         {/* Filters and Search */}
@@ -342,7 +301,6 @@ export default function SalesTeamManagement() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Team Member</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Performance</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
@@ -393,28 +351,7 @@ export default function SalesTeamManagement() {
                            'Employee'}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900">
-                          <div className="flex items-center mb-1">
-                            <span className="w-32">Leads Assigned:</span>
-                            <span className="font-medium">{member.performance.leadsAssigned}</span>
-                          </div>
-                          <div className="flex items-center mb-1">
-                            <span className="w-32">Converted:</span>
-                            <span className="font-medium">{member.performance.converted}</span>
-                          </div>
-                          <div className="flex items-center mb-1">
-                            <span className="w-32">Conversion Rate:</span>
-                            <span className={`font-medium ${getStatusColor(calculateConversionRate(member.performance.leadsAssigned, member.performance.converted))}`}>
-                              {calculateConversionRate(member.performance.leadsAssigned, member.performance.converted)}
-                            </span>
-                          </div>
-                          <div className="flex items-center">
-                            <span className="w-32">Total Value:</span>
-                            <span className="font-medium">{formatCurrency(member.performance.totalValue)}</span>
-                          </div>
-                        </div>
-                      </td>
+
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 py-1 text-xs rounded-full ${member.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
                           {member.status === 'active' ? 'Active' : 'On Leave'}
@@ -595,24 +532,7 @@ export default function SalesTeamManagement() {
                   <p className="text-sm text-gray-500">Phone</p>
                   <p className="font-medium">{selectedMember.phone || 'N/A'}</p>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-500">Leads Assigned</p>
-                  <p className="font-medium">{selectedMember.performance.leadsAssigned}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Converted</p>
-                  <p className="font-medium">{selectedMember.performance.converted}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Conversion Rate</p>
-                  <p className={`font-medium ${getStatusColor(calculateConversionRate(selectedMember.performance.leadsAssigned, selectedMember.performance.converted))}`}>
-                    {calculateConversionRate(selectedMember.performance.leadsAssigned, selectedMember.performance.converted)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Total Value</p>
-                  <p className="font-medium">{formatCurrency(selectedMember.performance.totalValue)}</p>
-                </div>
+
               </div>
               <div className="mt-6 flex justify-end space-x-3">
                 <button

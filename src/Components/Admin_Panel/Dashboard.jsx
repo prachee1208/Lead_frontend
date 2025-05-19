@@ -4,7 +4,7 @@ import {
     Calendar, Clock, List, Home, PieChart,
     Bell, User, LogOut, ChevronDown, Search,
     Filter, Menu, X, Mail, CheckCircle,
-    Activity, MessageSquare, FileText
+    MessageSquare, FileText
 } from 'lucide-react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 
@@ -136,19 +136,7 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
                             <span>Reports</span>
                         </NavLink>
                     </li>
-                    <li className="mb-2">
-                        <NavLink
-                            to="performance"
-                            className={({isActive}) =>
-                                `flex items-center space-x-2 py-2 px-2 rounded-md ${
-                                    isActive ? 'bg-white text-[#022d38]' : 'text-indigo-200 hover:bg-white hover:text-[#022d38]'
-                                }`
-                            }
-                        >
-                            <Activity size={18} />
-                            <span>Performance</span>
-                        </NavLink>
-                    </li>
+
                 </ul>
 
                 <p className="text-xs uppercase tracking-wider text-indigo-400 mt-6 mb-2">Communication</p>

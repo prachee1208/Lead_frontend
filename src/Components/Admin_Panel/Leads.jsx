@@ -64,7 +64,7 @@ export default function SalesLeadDashboard() {
     try {
       const params = {
         page,
-        limit,
+        limit: 100, // Set a high limit to get all leads
         sort: `${sortDirection === 'desc' ? '-' : ''}${sortField}`,
         status: statusFilter !== 'All Statuses' ? statusFilter : undefined,
         search: searchQuery || undefined,

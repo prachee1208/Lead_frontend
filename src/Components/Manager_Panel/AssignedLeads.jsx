@@ -8,7 +8,7 @@ import {
 import { toast } from 'react-toastify';
 import enhancedAPI, { getConnectionStatus } from '../../services/enhancedAPI';
 import dataFetcher from '../../services/dataFetcher';
-import ConnectionMonitor from '../../Components/Common/ConnectionMonitor';
+import ConnectionMonitor from '../../Components/common/ConnectionMonitor';
 
 export default function AssignedLeads() {
     const [leads, setLeads] = useState([]);
@@ -426,7 +426,7 @@ export default function AssignedLeads() {
 
             // If enhanced API fails, try direct axios call
             try {
-                const API_URL = 'http://localhost:8000/api';
+                const API_URL = 'https://lead-backend-jcyc.onrender.com/api';
                 const token = localStorage.getItem('token');
 
                 const axiosResponse = await axios.delete(`${API_URL}/leads/${selectedLead.id}`, {
@@ -498,7 +498,7 @@ export default function AssignedLeads() {
 
             // If enhanced API fails, try direct axios call
             try {
-                const API_URL = 'http://localhost:8000/api';
+                const API_URL = 'https://lead-backend-jcyc.onrender.com/api';
                 const token = localStorage.getItem('token');
 
                 const axiosResponse = await axios.post(
@@ -620,7 +620,7 @@ export default function AssignedLeads() {
 
             // If enhanced API fails, try direct axios call
             try {
-                const API_URL = 'http://localhost:8000/api';
+                const API_URL = 'https://lead-backend-jcyc.onrender.com/api';
                 const token = localStorage.getItem('token');
 
                 const axiosResponse = await axios.put(

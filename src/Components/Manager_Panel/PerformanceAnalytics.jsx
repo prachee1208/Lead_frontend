@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
     Activity, Search, Filter, Calendar, Clock,
     AlertCircle, CheckCircle, User, MessageSquare,
-    Phone, Mail, ArrowRight, BarChart2, RefreshCw,
+    Phone, Mail, ArrowRight, RefreshCw,
     Loader, UserPlus, Users, PieChart, TrendingUp,
     TrendingDown, Percent, DollarSign
 } from 'lucide-react';
@@ -54,130 +54,27 @@ export default function PerformanceAnalytics() {
         setError(null);
 
         try {
-            // Try to use the performance API endpoints first
-            try {
-                console.log('Fetching performance data with dateRange:', dateRange);
+            console.log('Fetching performance data with dateRange:', dateRange);
 
-                // Get employee performance data
-                try {
-                    const performanceResponse = await enhancedAPI.performance.getEmployeePerformance(dateRange);
-                    console.log('Employee performance response:', performanceResponse);
-
-                    // Get lead status distribution
-                    const statusResponse = await enhancedAPI.performance.getLeadStatusDistribution(dateRange);
-                    console.log('Lead status distribution response:', statusResponse);
-
-                    // Get conversion trend data
-                    const trendResponse = await enhancedAPI.performance.getConversionTrend(7); // Last 7 days
-                    console.log('Conversion trend response:', trendResponse);
-
-                    // Check if we have valid responses
-                    const hasValidPerformanceData = performanceResponse?.data?.success &&
-                                                  Array.isArray(performanceResponse.data.data) &&
-                                                  performanceResponse.data.data.length > 0;
-
-                    const hasValidStatusData = statusResponse?.data?.success &&
-                                             Array.isArray(statusResponse.data.data) &&
-                                             statusResponse.data.data.length > 0;
-
-                    const hasValidTrendData = trendResponse?.data?.success &&
-                                            Array.isArray(trendResponse.data.data) &&
-                                            trendResponse.data.data.length > 0;
-
-                    console.log('Data validation:', {
-                        hasValidPerformanceData,
-                        hasValidStatusData,
-                        hasValidTrendData
-                    });
-
-                    if (hasValidPerformanceData && hasValidStatusData && hasValidTrendData) {
-                        // Set employees for the filter dropdown
-                        const employeesData = performanceResponse.data.data;
-                        setEmployees(employeesData.map(emp => ({
-                            _id: emp.id,
-                            name: emp.name,
-                            email: emp.email
-                        })));
-
-                        // Set performance data
-                        setPerformanceData(performanceResponse.data.data);
-
-                        // Set summary metrics
-                        setSummaryMetrics(performanceResponse.data.summaryMetrics);
-
-                        // Set chart data
-                        setLeadStatusData(statusResponse.data.data);
-                        setConversionTrendData(trendResponse.data.data);
-                        setEmployeePerformanceData(performanceResponse.data.data);
-
-                        setIsLoading(false);
-                        toast.success('Performance data loaded successfully');
-                        return;
-                    } else {
-                        // If we have some data but not all, use what we have
-                        if (hasValidPerformanceData) {
-                            const employeesData = performanceResponse.data.data;
-                            setEmployees(employeesData.map(emp => ({
-                                _id: emp.id,
-                                name: emp.name,
-                                email: emp.email
-                            })));
-                            setPerformanceData(performanceResponse.data.data);
-                            setEmployeePerformanceData(performanceResponse.data.data);
-
-                            if (performanceResponse.data.summaryMetrics) {
-                                setSummaryMetrics(performanceResponse.data.summaryMetrics);
-                            }
-                        }
-
-                        if (hasValidStatusData) {
-                            setLeadStatusData(statusResponse.data.data);
-                        }
-
-                        if (hasValidTrendData) {
-                            setConversionTrendData(trendResponse.data.data);
-                        }
-
-                        // If we have at least some data, don't throw an error
-                        if (hasValidPerformanceData || hasValidStatusData || hasValidTrendData) {
-                            console.warn('Partial data available, using what we have');
-                            toast.warning('Some performance data could not be loaded');
-                            setIsLoading(false);
-                            return;
-                        }
-
-                        console.warn('No valid data in API responses, generating mock data');
-                        toast.info('Using mock data for demonstration purposes');
-                        generateMockData();
-                        setIsLoading(false);
-                        return;
-                    }
-                } catch (endpointError) {
-                    console.error('Error calling specific performance endpoint:', endpointError);
-                    throw endpointError;
-                }
-            } catch (apiError) {
-                console.error('Error using performance API, falling back to client-side processing:', apiError);
-                toast.warning('Performance API unavailable, using client-side processing instead');
-            }
-
-            // Fallback: Get data and process it on the client side
-            // Get employees
+            // Get employees data
             const employeesResponse = await enhancedAPI.users.getByRole('employee');
+            console.log('Employees response:', employeesResponse);
 
-            // Get all leads
-            const leadsResponse = await enhancedAPI.leads.getAll();
+            // Get all leads with a high limit to ensure we get all data
+            const leadsResponse = await enhancedAPI.leads.getAll({ limit: 1000 });
+            console.log('Leads response:', leadsResponse);
 
-            if (employeesResponse?.data?.data && leadsResponse?.data?.data) {
-                const employeesData = employeesResponse.data.data;
-                const leadsData = leadsResponse.data.data;
+            if (employeesResponse?.data && leadsResponse?.data) {
+                const employeesData = employeesResponse.data;
+                const leadsData = leadsResponse.data;
 
+                // Store the raw data
                 setEmployees(employeesData);
                 setLeads(leadsData);
 
                 // Process data for performance metrics
                 processPerformanceData(employeesData, leadsData);
-                toast.info('Using client-side data processing (performance API not available)');
+                toast.success('Performance data loaded successfully');
             } else {
                 setError('Failed to fetch data from the server');
                 toast.error('Failed to load performance data');
@@ -191,12 +88,21 @@ export default function PerformanceAnalytics() {
         }
     };
 
-    // Process data for performance metrics
+    // Process data for performance metrics based on real database data
     const processPerformanceData = (employeesData, leadsData) => {
         // Calculate lead status distribution
         const statusCounts = {};
         leadsData.forEach(lead => {
-            const status = lead.status || 'Unknown';
+            // Handle different status values that might be in the database
+            let status = lead.status || 'Unknown';
+
+            // Normalize status values for better visualization
+            if (status === 'New Lead' || status === 'New') status = 'New';
+            if (status === 'Contact Made' || status === 'Contacted') status = 'Contacted';
+            if (status === 'Qualified' || status === 'In Progress' || status === 'Negotiation') status = 'In Progress';
+            if (status === 'Converted' || status === 'Closed' || status === 'Won') status = 'Converted';
+            if (status === 'Lost' || status === 'Rejected') status = 'Lost';
+
             statusCounts[status] = (statusCounts[status] || 0) + 1;
         });
 
@@ -204,6 +110,21 @@ export default function PerformanceAnalytics() {
             name: status,
             value: statusCounts[status]
         }));
+
+        // Sort by status progression
+        const statusOrder = {
+            'New': 1,
+            'Contacted': 2,
+            'In Progress': 3,
+            'Converted': 4,
+            'Lost': 5,
+            'Unknown': 6
+        };
+
+        statusChartData.sort((a, b) => {
+            return (statusOrder[a.name] || 999) - (statusOrder[b.name] || 999);
+        });
+
         setLeadStatusData(statusChartData);
 
         // Calculate employee performance
@@ -219,11 +140,14 @@ export default function PerformanceAnalytics() {
             // Count leads by status
             const leadsAssigned = employeeLeads.length;
             const leadsContacted = employeeLeads.filter(lead =>
-                lead.status === 'Contacted' || lead.status === 'Qualified' ||
-                lead.status === 'Converted' || lead.status === 'Closed'
+                lead.status === 'Contacted' || lead.status === 'Contact Made' ||
+                lead.status === 'Qualified' || lead.status === 'In Progress' ||
+                lead.status === 'Negotiation' || lead.status === 'Converted' ||
+                lead.status === 'Closed' || lead.status === 'Won'
             ).length;
+
             const leadsConverted = employeeLeads.filter(lead =>
-                lead.status === 'Converted' || lead.status === 'Closed'
+                lead.status === 'Converted' || lead.status === 'Closed' || lead.status === 'Won'
             ).length;
 
             // Calculate conversion rate
@@ -250,100 +174,101 @@ export default function PerformanceAnalytics() {
         const totalLeads = leadsData.length;
         const assignedLeads = leadsData.filter(lead => lead.assignedEmployee).length;
         const convertedLeads = leadsData.filter(lead =>
-            lead.status === 'Converted' || lead.status === 'Closed'
+            lead.status === 'Converted' || lead.status === 'Closed' || lead.status === 'Won'
         ).length;
         const conversionRate = assignedLeads > 0
             ? Math.round((convertedLeads / assignedLeads) * 100)
             : 0;
+
+        // Calculate average response time based on lead timestamps
+        let totalResponseTime = 0;
+        let leadsWithResponseTime = 0;
+
+        leadsData.forEach(lead => {
+            if (lead.createdAt && lead.updatedAt && lead.status !== 'New') {
+                const createdDate = new Date(lead.createdAt);
+                const updatedDate = new Date(lead.updatedAt);
+                const responseTimeHours = Math.round((updatedDate - createdDate) / (1000 * 60 * 60));
+
+                if (responseTimeHours > 0 && responseTimeHours < 720) { // Filter out unreasonable values (>30 days)
+                    totalResponseTime += responseTimeHours;
+                    leadsWithResponseTime++;
+                }
+            }
+        });
+
+        const avgResponseTime = leadsWithResponseTime > 0
+            ? Math.round(totalResponseTime / leadsWithResponseTime)
+            : 24; // Default if no data
 
         setSummaryMetrics({
             totalLeads,
             assignedLeads,
             convertedLeads,
             conversionRate,
-            avgResponseTime: 24 // Mock data in hours
+            avgResponseTime
         });
 
-        // Generate mock conversion trend data (would be from real historical data)
+        // Generate conversion trend data from actual lead data
         const trendData = [];
         const today = new Date();
+
+        // Create a map of dates to track leads and conversions
+        const dateMap = {};
+
+        // Initialize the last 7 days in the map
         for (let i = 6; i >= 0; i--) {
             const date = new Date(today);
             date.setDate(date.getDate() - i);
-            trendData.push({
-                date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                conversions: Math.floor(Math.random() * 5) + 1,
-                leads: Math.floor(Math.random() * 10) + 5
-            });
+            const dateString = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            dateMap[dateString] = { date: dateString, leads: 0, conversions: 0 };
         }
+
+        // Count leads and conversions by date
+        leadsData.forEach(lead => {
+            if (lead.createdAt) {
+                const createdDate = new Date(lead.createdAt);
+                // Only consider leads from the last 7 days
+                const daysDiff = Math.floor((today - createdDate) / (1000 * 60 * 60 * 24));
+
+                if (daysDiff >= 0 && daysDiff <= 6) {
+                    const dateString = createdDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+                    if (dateMap[dateString]) {
+                        dateMap[dateString].leads++;
+
+                        // Count as conversion if the lead was converted on the same day
+                        if (lead.status === 'Converted' || lead.status === 'Closed' || lead.status === 'Won') {
+                            const updatedDate = lead.updatedAt ? new Date(lead.updatedAt) : null;
+                            const updatedDateString = updatedDate ?
+                                updatedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) :
+                                dateString;
+
+                            if (dateMap[updatedDateString]) {
+                                dateMap[updatedDateString].conversions++;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Convert the map to an array and sort by date
+        Object.values(dateMap).forEach(item => {
+            trendData.push(item);
+        });
+
+        // Sort by date
+        trendData.sort((a, b) => {
+            const dateA = new Date(a.date);
+            const dateB = new Date(b.date);
+            return dateA - dateB;
+        });
+
         setConversionTrendData(trendData);
 
         // Set performance data for the table
         setPerformanceData(employeePerformance);
-    };
-
-    // Generate mock data for demonstration purposes
-    const generateMockData = () => {
-        // Generate mock employees
-        const mockEmployees = [
-            { _id: 'emp1', id: 'emp1', name: 'John Smith', email: 'john@example.com' },
-            { _id: 'emp2', id: 'emp2', name: 'Sarah Johnson', email: 'sarah@example.com' },
-            { _id: 'emp3', id: 'emp3', name: 'Michael Brown', email: 'michael@example.com' },
-            { _id: 'emp4', id: 'emp4', name: 'Emily Davis', email: 'emily@example.com' },
-            { _id: 'emp5', id: 'emp5', name: 'Robert Wilson', email: 'robert@example.com' }
-        ];
-
-        // Generate mock performance data
-        const mockPerformanceData = mockEmployees.map(emp => ({
-            id: emp.id,
-            name: emp.name,
-            email: emp.email,
-            leadsAssigned: Math.floor(Math.random() * 30) + 10,
-            leadsContacted: Math.floor(Math.random() * 20) + 5,
-            leadsConverted: Math.floor(Math.random() * 10) + 1,
-            conversionRate: Math.floor(Math.random() * 50) + 10
-        }));
-
-        // Generate mock lead status data
-        const mockLeadStatusData = [
-            { name: 'New', value: 35 },
-            { name: 'Contacted', value: 25 },
-            { name: 'Qualified', value: 15 },
-            { name: 'Proposal', value: 10 },
-            { name: 'Negotiation', value: 8 },
-            { name: 'Closed', value: 5 },
-            { name: 'Lost', value: 2 }
-        ];
-
-        // Generate mock conversion trend data
-        const mockTrendData = [];
-        const today = new Date();
-        for (let i = 6; i >= 0; i--) {
-            const date = new Date(today);
-            date.setDate(date.getDate() - i);
-            mockTrendData.push({
-                date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                conversions: Math.floor(Math.random() * 5) + 1,
-                leads: Math.floor(Math.random() * 10) + 5
-            });
-        }
-
-        // Generate mock summary metrics
-        const mockSummaryMetrics = {
-            totalLeads: 100,
-            assignedLeads: 80,
-            convertedLeads: 25,
-            conversionRate: 31,
-            avgResponseTime: 24
-        };
-
-        // Set the mock data
-        setEmployees(mockEmployees);
-        setPerformanceData(mockPerformanceData);
-        setEmployeePerformanceData(mockPerformanceData);
-        setLeadStatusData(mockLeadStatusData);
-        setConversionTrendData(mockTrendData);
-        setSummaryMetrics(mockSummaryMetrics);
     };
 
     // Filter performance data based on search and filters
@@ -399,15 +324,7 @@ export default function PerformanceAnalytics() {
                             </>
                         )}
                     </button>
-                    <button
-                        onClick={generateMockData}
-                        disabled={isLoading}
-                        className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 flex items-center"
-                        title="Use demo data"
-                    >
-                        <BarChart2 size={16} className="mr-2" />
-                        Demo Data
-                    </button>
+
                 </div>
             </div>
 
@@ -416,15 +333,7 @@ export default function PerformanceAnalytics() {
                 <div className="bg-red-100 border border-red-200 text-red-800 px-4 py-3 rounded-md flex items-center">
                     <AlertCircle size={20} className="mr-2" />
                     <span>{error}</span>
-                    <div className="ml-auto flex space-x-2">
-                        <button
-                            onClick={generateMockData}
-                            className="px-3 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 flex items-center"
-                            title="Use mock data for demonstration"
-                        >
-                            <BarChart2 size={16} className="mr-1" />
-                            Use Demo Data
-                        </button>
+                    <div className="ml-auto">
                         <button
                             onClick={fetchData}
                             className="px-3 py-1 bg-red-700 text-white rounded-md hover:bg-red-800 flex items-center"
@@ -513,7 +422,7 @@ export default function PerformanceAnalytics() {
                                             dataKey="value"
                                             label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                                         >
-                                            {leadStatusData.map((entry, index) => (
+                                            {leadStatusData.map((_, index) => (
                                                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                             ))}
                                         </Pie>

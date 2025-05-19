@@ -19,6 +19,10 @@ export default function DashboardHome() {
     const [isLoadingLeads, setIsLoadingLeads] = useState(true);
     const [error, setError] = useState(null);
 
+    // Last updated timestamp
+    const [lastUpdated, setLastUpdated] = useState(new Date());
+    const [isUpdating, setIsUpdating] = useState(false);
+
     // Stats state
     const [stats, setStats] = useState([
         { id: 1, name: 'Assigned Leads', value: '0', icon: <UserPlus className="text-blue-500" />, change: '+0', changeType: 'increase' },
@@ -28,8 +32,11 @@ export default function DashboardHome() {
     ]);
 
     // Fetch leads assigned to the current employee using enhanced data fetcher
-    const fetchLeads = async () => {
-        setIsLoadingLeads(true);
+    const fetchLeads = async (options = {}) => {
+        // Only show loading indicator on initial load, not during background updates
+        if (!options.forceRefresh) {
+            setIsLoadingLeads(true);
+        }
         setError(null);
 
         try {
@@ -44,15 +51,18 @@ export default function DashboardHome() {
 
             // Use the enhanced data fetcher with caching and offline support
             const response = await dataFetcher.fetchEmployeeLeads(userId, {}, {
-                // Force refresh data from server
-                forceRefresh: true,
+                // Force refresh data from server if specified
+                forceRefresh: options.forceRefresh || false,
                 // Provide offline fallback data
                 offlineData: { data: { data: [] } },
                 // Handle errors
                 onError: (err) => {
                     console.error('Error in data fetcher:', err);
-                    setError('Failed to load leads. Please try again.');
-                    toast.error('Failed to load leads: ' + (err.message || 'Unknown error'));
+                    // Only show error toast on initial load or if explicitly requested
+                    if (!options.forceRefresh || options.showErrors) {
+                        setError('Failed to load leads. Please try again.');
+                        toast.error('Failed to load leads: ' + (err.message || 'Unknown error'));
+                    }
                 }
             });
 
@@ -89,6 +99,11 @@ export default function DashboardHome() {
                     new Date(b.assignedDate) - new Date(a.assignedDate)
                 );
                 setRecentLeads(sortedLeads.slice(0, 3));
+
+                // Update last updated timestamp if this was a manual refresh
+                if (options.forceRefresh && !options.isPartOfBatchUpdate) {
+                    setLastUpdated(new Date());
+                }
             } else {
                 // If no data is returned, use empty array
                 setRecentLeads([]);
@@ -103,11 +118,46 @@ export default function DashboardHome() {
         }
     };
 
-    // Load data on component mount
+    // Function to update all data
+    const updateAllData = async () => {
+        setIsUpdating(true);
+
+        try {
+            // Fetch all data in parallel
+            await Promise.all([
+                fetchLeads({ forceRefresh: true, isPartOfBatchUpdate: true }),
+                fetchFollowUps({ forceRefresh: true, isPartOfBatchUpdate: true }),
+                fetchTasks({ forceRefresh: true, isPartOfBatchUpdate: true })
+            ]);
+
+            // Update the last updated timestamp
+            setLastUpdated(new Date());
+            console.log('All data updated successfully at', new Date().toLocaleTimeString());
+        } catch (error) {
+            console.error('Error updating data:', error);
+        } finally {
+            setIsUpdating(false);
+        }
+    };
+
+    // Load data on component mount and set up real-time updates
     useEffect(() => {
+        // Initial data fetch
         fetchLeads();
         fetchFollowUps();
         fetchTasks();
+
+        // Set up interval for real-time updates (every 30 seconds)
+        const updateInterval = setInterval(() => {
+            console.log('Performing real-time data update');
+            updateAllData();
+        }, 30000); // 30 seconds
+
+        // Clean up interval on component unmount
+        return () => {
+            clearInterval(updateInterval);
+            console.log('Cleared real-time update interval');
+        };
     }, []);
 
     // State for follow-ups
@@ -116,8 +166,11 @@ export default function DashboardHome() {
     const [followUpError, setFollowUpError] = useState(null);
 
     // Fetch follow-ups for the current employee
-    const fetchFollowUps = async () => {
-        setIsLoadingFollowUps(true);
+    const fetchFollowUps = async (options = {}) => {
+        // Only show loading indicator on initial load, not during background updates
+        if (!options.forceRefresh) {
+            setIsLoadingFollowUps(true);
+        }
         setFollowUpError(null);
 
         try {
@@ -130,49 +183,68 @@ export default function DashboardHome() {
                 return;
             }
 
-            // Use the enhanced data fetcher to get leads with follow-ups
-            const response = await dataFetcher.fetch(
-                `followups:employee:${userId}`,
-                () => enhancedAPI.leads.getByEmployee(userId, { hasFollowUp: true }),
-                {
-                    // Provide offline fallback data
-                    offlineData: { data: { data: [] } },
-                    // Handle errors
-                    onError: (err) => {
-                        console.error('Error fetching follow-ups:', err);
-                        setFollowUpError('Failed to load follow-ups. Please try again.');
-                    }
-                }
-            );
+            // Use the direct API call to get follow-ups for the employee
+            const response = await enhancedAPI.followUps.getByEmployee(userId);
+            console.log('Follow-ups response:', response);
 
-            if (response && response.data && response.data.data) {
+            if (response && response.data) {
                 // Transform the API response to match our component's data structure
-                const formattedFollowUps = response.data.data
-                    .filter(lead => lead.followUp && lead.followUp.nextFollowUpDate) // Only include leads with follow-ups
-                    .map(lead => ({
-                        id: lead._id,
-                        leadId: lead._id,
-                        leadName: lead.name,
-                        company: lead.company || 'N/A',
-                        type: lead.followUp.type || 'call',
-                        dueDate: new Date(lead.followUp.nextFollowUpDate).toLocaleDateString(),
-                        dueTime: new Date(lead.followUp.nextFollowUpDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                        notes: lead.followUp.notes
-                    }));
+                const formattedFollowUps = response.data.map(followUp => ({
+                    id: followUp._id,
+                    leadId: followUp.leadId,
+                    leadName: followUp.leadName || 'Unknown Lead',
+                    company: followUp.company || 'N/A',
+                    type: followUp.type || 'call',
+                    dueDate: new Date(followUp.dueDate).toLocaleDateString(),
+                    dueTime: new Date(followUp.dueDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    notes: followUp.notes || '',
+                    completed: followUp.completed || false
+                }));
+
+                // Filter out completed follow-ups
+                const pendingFollowUps = formattedFollowUps.filter(followUp => !followUp.completed);
 
                 // Sort by due date (ascending)
-                const sortedFollowUps = formattedFollowUps.sort((a, b) =>
+                const sortedFollowUps = pendingFollowUps.sort((a, b) =>
                     new Date(a.dueDate + ' ' + a.dueTime) - new Date(b.dueDate + ' ' + b.dueTime)
                 );
 
                 // Take only the 3 most recent follow-ups for the dashboard
                 setFollowUps(sortedFollowUps.slice(0, 3));
+
+                // Update stats with follow-up count
+                setStats(prevStats => {
+                    const newStats = [...prevStats];
+                    newStats[1] = {
+                        ...newStats[1],
+                        value: pendingFollowUps.length.toString(),
+                        change: `+${pendingFollowUps.length}`,
+                        changeType: pendingFollowUps.length > 0 ? 'increase' : 'neutral'
+                    };
+                    return newStats;
+                });
             } else {
                 setFollowUps([]);
+
+                // Update stats with zero follow-ups
+                setStats(prevStats => {
+                    const newStats = [...prevStats];
+                    newStats[1] = {
+                        ...newStats[1],
+                        value: '0',
+                        change: '0',
+                        changeType: 'neutral'
+                    };
+                    return newStats;
+                });
             }
         } catch (err) {
             console.error('Error fetching follow-ups:', err);
             setFollowUpError('Failed to load follow-ups. Please try again.');
+
+            if (!options.forceRefresh || options.showErrors) {
+                toast.error('Failed to load follow-ups: ' + (err.message || 'Unknown error'));
+            }
         } finally {
             setIsLoadingFollowUps(false);
         }
@@ -184,8 +256,11 @@ export default function DashboardHome() {
     const [taskError, setTaskError] = useState(null);
 
     // Fetch tasks for the current employee
-    const fetchTasks = async () => {
-        setIsLoadingTasks(true);
+    const fetchTasks = async (options = {}) => {
+        // Only show loading indicator on initial load, not during background updates
+        if (!options.forceRefresh) {
+            setIsLoadingTasks(true);
+        }
         setTaskError(null);
 
         try {
@@ -198,29 +273,21 @@ export default function DashboardHome() {
                 return;
             }
 
-            // Use the enhanced data fetcher to get tasks
-            const response = await dataFetcher.fetch(
-                `tasks:employee:${userId}`,
-                () => enhancedAPI.reminders.getAll(),
-                {
-                    // Provide offline fallback data
-                    offlineData: { data: [] },
-                    // Handle errors
-                    onError: (err) => {
-                        console.error('Error fetching tasks:', err);
-                        setTaskError('Failed to load tasks. Please try again.');
-                    }
-                }
-            );
+            // Use the direct API call to get reminders/tasks
+            const response = await enhancedAPI.reminders.getAll();
+            console.log('Tasks/Reminders response:', response);
 
             if (response && response.data) {
+                // Filter tasks for the current user
+                const userTasks = response.data.filter(task => task.employeeId === userId);
+
                 // Transform the API response to match our component's data structure
-                const formattedTasks = response.data.map(task => ({
+                const formattedTasks = userTasks.map(task => ({
                     id: task._id,
-                    task: task.title || 'Untitled Task',
+                    task: task.description || 'Untitled Task',
                     completed: task.completed || false,
                     priority: task.priority || 'medium',
-                    dueDate: task.date ? new Date(task.date).toLocaleDateString() : 'No due date'
+                    dueDate: task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'No due date'
                 }));
 
                 // Filter for today's tasks
@@ -250,16 +317,32 @@ export default function DashboardHome() {
                         ...newStats[3],
                         value: todaysTasks.length.toString(),
                         change: `+${todaysTasks.length}`,
-                        changeType: 'increase'
+                        changeType: todaysTasks.length > 0 ? 'increase' : 'neutral'
                     };
                     return newStats;
                 });
             } else {
                 setTasks([]);
+
+                // Update stats with zero tasks
+                setStats(prevStats => {
+                    const newStats = [...prevStats];
+                    newStats[3] = {
+                        ...newStats[3],
+                        value: '0',
+                        change: '0',
+                        changeType: 'neutral'
+                    };
+                    return newStats;
+                });
             }
         } catch (err) {
             console.error('Error fetching tasks:', err);
             setTaskError('Failed to load tasks. Please try again.');
+
+            if (!options.forceRefresh || options.showErrors) {
+                toast.error('Failed to load tasks: ' + (err.message || 'Unknown error'));
+            }
         } finally {
             setIsLoadingTasks(false);
         }
@@ -322,10 +405,26 @@ export default function DashboardHome() {
 
             <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-semibold text-gray-800">Employee Dashboard</h1>
-                <div className="text-sm text-gray-500">
-                    <Clock size={16} className="inline mr-1" />
-                    {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                <div className="flex items-center space-x-4">
+                    <button
+                        onClick={updateAllData}
+                        className={`flex items-center text-sm text-indigo-600 hover:text-indigo-800 ${isUpdating ? 'opacity-50 cursor-wait' : ''}`}
+                        disabled={isUpdating}
+                    >
+                        <RefreshCw size={16} className={`mr-1 ${isUpdating ? 'animate-spin' : ''}`} />
+                        {isUpdating ? 'Updating...' : 'Refresh Data'}
+                    </button>
+                    <div className="text-sm text-gray-500 flex items-center">
+                        <Clock size={16} className="inline mr-1" />
+                        {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                    </div>
                 </div>
+            </div>
+
+            {/* Last updated indicator */}
+            <div className="flex items-center justify-end text-xs text-gray-500 -mt-2 mb-2">
+                Last updated: {lastUpdated.toLocaleTimeString()}
+                {isUpdating && <span className="ml-2 text-indigo-500">(Updating...)</span>}
             </div>
 
             {/* Stats Cards */}
@@ -363,15 +462,14 @@ export default function DashboardHome() {
                         <h2 className="text-lg font-semibold text-gray-800">My Recently Assigned Leads</h2>
                         <div className="flex items-center space-x-2">
                             <Link to="/employee-panel/leads" className="text-sm text-blue-500 hover:text-blue-700">View all</Link>
-                            {!isLoadingLeads && (
-                                <button
-                                    onClick={fetchLeads}
-                                    className="p-1 rounded-md hover:bg-gray-100"
-                                    title="Refresh leads"
-                                >
-                                    <RefreshCw size={16} className="text-gray-500" />
-                                </button>
-                            )}
+                            <button
+                                onClick={() => fetchLeads({ forceRefresh: true, showErrors: true })}
+                                className={`p-1 rounded-md hover:bg-gray-100 ${isUpdating || isLoadingLeads ? 'opacity-50' : ''}`}
+                                title="Refresh leads"
+                                disabled={isUpdating || isLoadingLeads}
+                            >
+                                <RefreshCw size={16} className={`text-gray-500 ${isUpdating && 'animate-spin'}`} />
+                            </button>
                         </div>
                     </div>
 
@@ -381,10 +479,11 @@ export default function DashboardHome() {
                             <AlertCircle size={20} className="mr-2" />
                             <span>{error}</span>
                             <button
-                                onClick={fetchLeads}
-                                className="ml-auto text-red-800 hover:text-red-900"
+                                onClick={() => fetchLeads({ forceRefresh: true, showErrors: true })}
+                                className={`ml-auto text-red-800 hover:text-red-900 ${isUpdating ? 'opacity-50' : ''}`}
+                                disabled={isUpdating}
                             >
-                                <RefreshCw size={16} />
+                                <RefreshCw size={16} className={isUpdating ? 'animate-spin' : ''} />
                             </button>
                         </div>
                     )}
@@ -436,15 +535,14 @@ export default function DashboardHome() {
                         <h2 className="text-lg font-semibold text-gray-800">Upcoming Follow-ups</h2>
                         <div className="flex items-center space-x-2">
                             <Link to="/employee-panel/follow-ups" className="text-sm text-blue-500 hover:text-blue-700">View all</Link>
-                            {!isLoadingFollowUps && (
-                                <button
-                                    onClick={fetchFollowUps}
-                                    className="p-1 rounded-md hover:bg-gray-100"
-                                    title="Refresh follow-ups"
-                                >
-                                    <RefreshCw size={16} className="text-gray-500" />
-                                </button>
-                            )}
+                            <button
+                                onClick={() => fetchFollowUps({ forceRefresh: true, showErrors: true })}
+                                className={`p-1 rounded-md hover:bg-gray-100 ${isUpdating || isLoadingFollowUps ? 'opacity-50' : ''}`}
+                                title="Refresh follow-ups"
+                                disabled={isUpdating || isLoadingFollowUps}
+                            >
+                                <RefreshCw size={16} className={`text-gray-500 ${isUpdating && 'animate-spin'}`} />
+                            </button>
                         </div>
                     </div>
 
@@ -454,10 +552,11 @@ export default function DashboardHome() {
                             <AlertCircle size={20} className="mr-2" />
                             <span>{followUpError}</span>
                             <button
-                                onClick={fetchFollowUps}
-                                className="ml-auto text-red-800 hover:text-red-900"
+                                onClick={() => fetchFollowUps({ forceRefresh: true, showErrors: true })}
+                                className={`ml-auto text-red-800 hover:text-red-900 ${isUpdating ? 'opacity-50' : ''}`}
+                                disabled={isUpdating}
                             >
-                                <RefreshCw size={16} />
+                                <RefreshCw size={16} className={isUpdating ? 'animate-spin' : ''} />
                             </button>
                         </div>
                     )}
@@ -519,15 +618,14 @@ export default function DashboardHome() {
                     <h2 className="text-lg font-semibold text-gray-800">Today's Tasks</h2>
                     <div className="flex items-center space-x-2">
                         <Link to="/employee-panel/tasks" className="text-sm text-blue-500 hover:text-blue-700">View all</Link>
-                        {!isLoadingTasks && (
-                            <button
-                                onClick={fetchTasks}
-                                className="p-1 rounded-md hover:bg-gray-100"
-                                title="Refresh tasks"
-                            >
-                                <RefreshCw size={16} className="text-gray-500" />
-                            </button>
-                        )}
+                        <button
+                            onClick={() => fetchTasks({ forceRefresh: true, showErrors: true })}
+                            className={`p-1 rounded-md hover:bg-gray-100 ${isUpdating || isLoadingTasks ? 'opacity-50' : ''}`}
+                            title="Refresh tasks"
+                            disabled={isUpdating || isLoadingTasks}
+                        >
+                            <RefreshCw size={16} className={`text-gray-500 ${isUpdating && 'animate-spin'}`} />
+                        </button>
                     </div>
                 </div>
 
@@ -537,10 +635,11 @@ export default function DashboardHome() {
                         <AlertCircle size={20} className="mr-2" />
                         <span>{taskError}</span>
                         <button
-                            onClick={fetchTasks}
-                            className="ml-auto text-red-800 hover:text-red-900"
+                            onClick={() => fetchTasks({ forceRefresh: true, showErrors: true })}
+                            className={`ml-auto text-red-800 hover:text-red-900 ${isUpdating ? 'opacity-50' : ''}`}
+                            disabled={isUpdating}
                         >
-                            <RefreshCw size={16} />
+                            <RefreshCw size={16} className={isUpdating ? 'animate-spin' : ''} />
                         </button>
                     </div>
                 )}

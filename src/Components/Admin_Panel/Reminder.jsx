@@ -413,15 +413,36 @@ export default function RemindersComponent() {
   const testApiConnection = async () => {
     try {
       console.log('Testing API connection...');
-      const response = await fetch('http://localhost:8000/api/reminders/test');
-      const data = await response.json();
-      console.log('Test API response:', data);
+      // Use the axios instance from api.js
+      const response = await fetch('https://lead-backend-jcyc.onrender.com/api/reminders/test', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
 
-      if (data.success) {
-        toast.success('API connection test successful');
-        return true;
-      } else {
-        toast.error('API connection test failed');
+      // Check if response is ok before trying to parse JSON
+      if (!response.ok) {
+        console.error('API test response not OK:', response.status, response.statusText);
+        toast.error(`API connection test failed: ${response.status} ${response.statusText}`);
+        return false;
+      }
+
+      try {
+        const data = await response.json();
+        console.log('Test API response:', data);
+
+        if (data.success) {
+          toast.success('API connection test successful');
+          return true;
+        } else {
+          toast.error('API connection test failed');
+          return false;
+        }
+      } catch (jsonError) {
+        console.error('Error parsing JSON response:', jsonError);
+        toast.error('API response format error: ' + jsonError.message);
         return false;
       }
     } catch (error) {
@@ -578,22 +599,13 @@ export default function RemindersComponent() {
           console.error('Error refreshing token:', loginError);
         }
 
-        // Use direct fetch instead of the API service
-        const response = await fetch('http://localhost:8000/api/reminders', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(reminderData)
-        });
+        // Use the API service instead of direct fetch
+        const response = await remindersAPI.create(reminderData);
+        console.log('Reminder creation response:', response);
 
-        const data = await response.json();
-        console.log('Reminder creation response:', data);
-
-        if (response.ok && data.success) {
-          console.log('Reminder saved successfully:', data);
-          const savedReminder = data.data;
+        if (response && response.data && response.data.success) {
+          console.log('Reminder saved successfully:', response.data);
+          const savedReminder = response.data.data;
           setReminders([...reminders, {
             id: savedReminder._id,
             type: savedReminder.type,
@@ -614,9 +626,9 @@ export default function RemindersComponent() {
           });
           toast.success('Reminder created successfully');
         } else {
-          console.error('Error response from server:', data);
+          console.error('Error response from server:', response);
 
-          if (response.status === 401) {
+          if (response && response.status === 401) {
             // If authentication failed, suggest logging in again
             toast.error('Your session has expired. Please log in again.');
             localStorage.removeItem('token'); // Clear the invalid token
@@ -627,7 +639,8 @@ export default function RemindersComponent() {
               window.location.href = '/login';
             }, 2000);
           } else {
-            toast.error('Failed to create reminder: ' + (data.message || 'Unknown error'));
+            const errorMessage = response?.data?.message || 'Unknown error';
+            toast.error('Failed to create reminder: ' + errorMessage);
           }
         }
       } catch (error) {

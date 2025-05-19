@@ -143,11 +143,32 @@ export default function LeadsList() {
         return matchesSearch && matchesStatus;
     });
 
-    const handleStatusChange = (leadId, newStatus) => {
-        setLeads(leads.map(lead =>
-            lead.id === leadId ? { ...lead, status: newStatus } : lead
-        ));
-        setShowActionMenu(null);
+    const handleStatusChange = async (leadId, newStatus) => {
+        try {
+            // Optimistically update UI
+            setLeads(leads.map(lead =>
+                lead.id === leadId ? { ...lead, status: newStatus } : lead
+            ));
+            setShowActionMenu(null);
+
+            // Update in the database
+            const response = await enhancedAPI.leads.update(leadId, { status: newStatus });
+            console.log('Update lead status response:', response);
+
+            toast.success(`Lead status updated to ${newStatus}`);
+
+            // Update last contact date if status is changed to "Contacted"
+            if (newStatus === 'Contacted') {
+                const now = new Date().toISOString();
+                await enhancedAPI.leads.update(leadId, { lastContact: now });
+            }
+        } catch (err) {
+            console.error('Error updating lead status:', err);
+            toast.error('Failed to update lead status: ' + (err.message || 'Unknown error'));
+
+            // Refresh leads to ensure consistency
+            fetchLeads();
+        }
     };
 
     // Debug function to test lead assignment

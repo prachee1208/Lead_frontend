@@ -4,10 +4,12 @@ import {
     ArrowLeft, Phone, Mail, MessageSquare, Calendar,
     Clock, FileText, Edit, CheckCircle, X, User,
     Building, MapPin, Globe, Briefcase, DollarSign,
-    AlertCircle, RefreshCw, Loader
+    AlertCircle, RefreshCw, Loader, Trash2, Users
 } from 'lucide-react';
 import { leadsAPI } from '../../services/api';
+import { enhancedAPI } from '../../services/enhancedAPI';
 import { toast } from 'react-toastify';
+import FollowUpForm from './FollowUpForm';
 
 export default function LeadDetail() {
     const { leadId } = useParams();
@@ -17,6 +19,8 @@ export default function LeadDetail() {
     const [error, setError] = useState(null);
     const [activeTab, setActiveTab] = useState('overview');
     const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+    const [showFollowUpForm, setShowFollowUpForm] = useState(false);
+    const [isLoadingFollowUps, setIsLoadingFollowUps] = useState(false);
 
     // Fetch lead data from API
     const fetchLeadData = async () => {
@@ -88,10 +92,116 @@ export default function LeadDetail() {
         }
     };
 
+    // Fetch follow-ups for this lead
+    const fetchFollowUps = async () => {
+        if (!lead) return;
+
+        setIsLoadingFollowUps(true);
+
+        try {
+            const response = await enhancedAPI.followUps.getByLead(leadId);
+            console.log('Follow-ups response:', response);
+
+            if (response && response.data) {
+                // Transform the API response to match our component's data structure
+                const formattedFollowUps = response.data.map(followUp => ({
+                    id: followUp._id,
+                    type: followUp.type || 'call',
+                    title: followUp.title || `${followUp.type} follow-up`,
+                    dueDate: new Date(followUp.dueDate),
+                    notes: followUp.notes || '',
+                    completed: followUp.completed || false
+                }));
+
+                // Update the lead with the follow-ups
+                setLead(prevLead => ({
+                    ...prevLead,
+                    followUps: formattedFollowUps
+                }));
+            }
+        } catch (err) {
+            console.error('Error fetching follow-ups:', err);
+            toast.error('Failed to load follow-ups: ' + (err.message || 'Unknown error'));
+        } finally {
+            setIsLoadingFollowUps(false);
+        }
+    };
+
+    // Handle adding a new follow-up
+    const handleFollowUpSuccess = (newFollowUp) => {
+        setShowFollowUpForm(false);
+
+        // Add the new follow-up to the lead
+        setLead(prevLead => ({
+            ...prevLead,
+            followUps: [...prevLead.followUps, newFollowUp]
+        }));
+
+        // Switch to the follow-ups tab
+        setActiveTab('followUps');
+    };
+
+    // Handle deleting a follow-up
+    const handleDeleteFollowUp = async (id) => {
+        try {
+            // Optimistically update UI
+            const updatedFollowUps = lead.followUps.filter(followUp => followUp.id !== id);
+            setLead(prevLead => ({
+                ...prevLead,
+                followUps: updatedFollowUps
+            }));
+
+            // Delete from the database
+            const response = await enhancedAPI.followUps.delete(id);
+            console.log('Delete follow-up response:', response);
+
+            toast.success('Follow-up deleted successfully');
+        } catch (err) {
+            console.error('Error deleting follow-up:', err);
+            toast.error('Failed to delete follow-up: ' + (err.message || 'Unknown error'));
+
+            // Revert the optimistic update by fetching fresh data
+            fetchFollowUps();
+        }
+    };
+
+    // Handle marking a follow-up as complete
+    const handleMarkFollowUpComplete = async (id) => {
+        try {
+            // Optimistically update UI
+            const updatedFollowUps = lead.followUps.map(followUp =>
+                followUp.id === id ? { ...followUp, completed: true } : followUp
+            );
+            setLead(prevLead => ({
+                ...prevLead,
+                followUps: updatedFollowUps
+            }));
+
+            // Update in the database
+            const response = await enhancedAPI.followUps.markComplete(id);
+            console.log('Mark follow-up complete response:', response);
+
+            toast.success('Follow-up marked as completed');
+        } catch (err) {
+            console.error('Error marking follow-up as complete:', err);
+            toast.error('Failed to update follow-up: ' + (err.message || 'Unknown error'));
+
+            // Revert the optimistic update
+            fetchFollowUps();
+        }
+    };
+
     // Load data on component mount
     useEffect(() => {
         fetchLeadData();
     }, [leadId]);
+
+    // Fetch follow-ups when lead data is loaded
+    useEffect(() => {
+        if (lead && lead.id) {
+            fetchFollowUps();
+        }
+    }, [lead?.id]);
 
     const handleStatusChange = async (newStatus) => {
         setShowStatusDropdown(false);
@@ -296,15 +406,26 @@ export default function LeadDetail() {
                         <MessageSquare size={18} className="mr-2" />
                         Message
                     </Link>
-                    <Link
-                        to={`/employee-panel/leads/${lead.id}/follow-up`}
+                    <button
+                        onClick={() => setShowFollowUpForm(true)}
                         className="flex items-center px-4 py-2 bg-purple-50 text-purple-700 rounded-md hover:bg-purple-100"
                     >
                         <Calendar size={18} className="mr-2" />
                         Schedule Follow-up
-                    </Link>
+                    </button>
                 </div>
             </div>
+
+            {/* Follow-up Form */}
+            {showFollowUpForm && (
+                <div className="mt-6">
+                    <FollowUpForm
+                        lead={lead}
+                        onSuccess={handleFollowUpSuccess}
+                        onCancel={() => setShowFollowUpForm(false)}
+                    />
+                </div>
+            )}
 
             {/* Tabs */}
             <div className="bg-white rounded-lg shadow">
@@ -471,15 +592,30 @@ export default function LeadDetail() {
                         <div>
                             <div className="flex items-center justify-between mb-4">
                                 <h3 className="text-lg font-medium text-gray-900">Follow-ups</h3>
-                                <Link
-                                    to={`/employee-panel/leads/${lead.id}/follow-up`}
-                                    className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm"
-                                >
-                                    Add Follow-up
-                                </Link>
+                                <div className="flex items-center space-x-2">
+                                    <button
+                                        onClick={fetchFollowUps}
+                                        className={`p-2 rounded-md hover:bg-gray-100 ${isLoadingFollowUps ? 'opacity-50' : ''}`}
+                                        title="Refresh follow-ups"
+                                        disabled={isLoadingFollowUps}
+                                    >
+                                        <RefreshCw size={16} className={`text-gray-500 ${isLoadingFollowUps ? 'animate-spin' : ''}`} />
+                                    </button>
+                                    <button
+                                        onClick={() => setShowFollowUpForm(true)}
+                                        className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm"
+                                    >
+                                        Add Follow-up
+                                    </button>
+                                </div>
                             </div>
 
-                            {lead.followUps.length === 0 ? (
+                            {isLoadingFollowUps ? (
+                                <div className="text-center py-8 bg-gray-50 rounded-md">
+                                    <Loader size={24} className="mx-auto text-blue-500 animate-spin mb-2" />
+                                    <p className="text-sm text-gray-500">Loading follow-ups...</p>
+                                </div>
+                            ) : lead.followUps.length === 0 ? (
                                 <div className="text-center py-8 bg-gray-50 rounded-md">
                                     <Calendar size={24} className="mx-auto text-gray-400 mb-2" />
                                     <p className="text-sm text-gray-500">No follow-ups scheduled for this lead.</p>
@@ -491,33 +627,49 @@ export default function LeadDetail() {
                                         <li key={followUp.id} className="py-4">
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center">
-                                                    <div className="mr-4">
+                                                    <div className={`
+                                                        w-10 h-10 rounded-full flex items-center justify-center
+                                                        ${followUp.type === 'call' ? 'bg-blue-100' :
+                                                        followUp.type === 'email' ? 'bg-green-100' :
+                                                        followUp.type === 'meeting' ? 'bg-purple-100' :
+                                                        'bg-orange-100'}
+                                                    `}>
                                                         {followUp.type === 'call' && <Phone size={20} className="text-blue-500" />}
                                                         {followUp.type === 'email' && <Mail size={20} className="text-green-500" />}
                                                         {followUp.type === 'meeting' && <Users size={20} className="text-purple-500" />}
+                                                        {followUp.type === 'message' && <MessageSquare size={20} className="text-orange-500" />}
                                                     </div>
-                                                    <div>
-                                                        <p className="text-sm font-medium text-gray-900">{followUp.title}</p>
-                                                        <p className="text-xs text-gray-500">{followUp.date} at {followUp.time}</p>
+                                                    <div className="ml-4">
+                                                        <p className="text-sm font-medium text-gray-900">
+                                                            {followUp.title || `${followUp.type.charAt(0).toUpperCase() + followUp.type.slice(1)} follow-up`}
+                                                        </p>
+                                                        <p className="text-xs text-gray-500">
+                                                            {followUp.dueDate.toLocaleDateString()} at {followUp.dueDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                        </p>
+                                                        {followUp.notes && (
+                                                            <p className="mt-1 text-sm text-gray-600">{followUp.notes}</p>
+                                                        )}
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center space-x-2">
-                                                    <button className="p-1 rounded-full hover:bg-gray-100">
-                                                        <Edit size={16} className="text-gray-500" />
-                                                    </button>
-                                                    <button className="p-1 rounded-full hover:bg-gray-100">
-                                                        <CheckCircle size={16} className="text-green-500" />
-                                                    </button>
-                                                    <button className="p-1 rounded-full hover:bg-gray-100">
-                                                        <X size={16} className="text-red-500" />
+                                                <div className="flex space-x-2">
+                                                    {!followUp.completed && (
+                                                        <button
+                                                            onClick={() => handleMarkFollowUpComplete(followUp.id)}
+                                                            className="p-1 rounded-full hover:bg-green-100"
+                                                            title="Mark as completed"
+                                                        >
+                                                            <CheckCircle size={18} className="text-green-500" />
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={() => handleDeleteFollowUp(followUp.id)}
+                                                        className="p-1 rounded-full hover:bg-red-100"
+                                                        title="Delete follow-up"
+                                                    >
+                                                        <Trash2 size={18} className="text-red-500" />
                                                     </button>
                                                 </div>
                                             </div>
-                                            {followUp.notes && (
-                                                <div className="mt-2 ml-8">
-                                                    <p className="text-sm text-gray-600">{followUp.notes}</p>
-                                                </div>
-                                            )}
                                         </li>
                                     ))}
                                 </ul>
